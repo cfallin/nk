@@ -1,5 +1,6 @@
-set(SRCS kernel.c thd.c databuf.c)
-set(TEST_SRCS test_main.c test.c test_databuf.c)
+set(SRCS src/kernel.c src/thd.c src/databuf.c)
+set(TEST_SRCS test/test_main.c test/test.c test/test_databuf.c)
+include_directories(include/)
 
 cmake_minimum_required(VERSION 2.6)
 project(nk)

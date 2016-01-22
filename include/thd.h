@@ -12,25 +12,29 @@ typedef enum nk_thd_state {
   NK_THD_FINISHED,
 } nk_thd_state;
 
+typedef struct nk_thd_attrs {
+  // Priority: higher is preferred.
+  uint32_t prio;
+} nk_thd_attrs;
+
+#define NK_THD_ATTR_INIT                                                       \
+  { NK_THD_PRIO_DEFAULT }
+
+#define NK_THD_PRIO_MIN 0
+#define NK_THD_PRIO_DEFAULT 0x80000000
+#define NK_THD_PRIO_MAX 0xffffffff
+
 typedef struct nk_thd {
   void *stack;
   size_t stacklen;
   void *retval;
   nk_thd_state state;
-  queue_entry runq;
+  nk_thd_attrs attrs;
+  queue_entry thdq;
   queue_head mailbox; // queue of messages sent to us
-  queue_head yield;   // queue of threads yielding to us
 } nk_thd;
 
-QUEUE_DEFINE(nk_thd, runq);
-
-typedef struct nk_thd_attrs {
-  uint32_t prio;
-  uint8_t preemptable;
-} nk_thd_attrs;
-
-#define NK_THD_ATTR_INIT                                                       \
-  { NK_THD_PRIO_DEFAULT, 0 }
+QUEUE_DEFINE(nk_thd, thdq);
 
 typedef void *(*nk_thd_entrypoint)(nk_thd *self, void *data);
 
