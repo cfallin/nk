@@ -7,7 +7,7 @@ nk_status nk_databuf_new(nk_databuf **ret, size_t capacity) {
     b = NK_ALLOCBYTES(nk_databuf, sizeof(nk_databuf) + capacity);
     if (!b)
       goto err;
-    b->data = b + 1;
+    b->data = (uint8_t *)(b + 1);
   } else {
     b = NK_ALLOC(nk_databuf);
     if (!b)
@@ -61,11 +61,11 @@ nk_status nk_databuf_reserve(nk_databuf *buf, size_t capacity) {
     return NK_OK;
   }
 
-  void *newbuf = NK_ALLOCBYTES(void, capacity);
+  uint8_t *newbuf = NK_ALLOCBYTES(void, capacity);
   if (!newbuf) {
     return NK_ERR_NOMEM;
   }
-  memcpy(newbuf, buf->data, buf->len);
+  memcpy(newbuf, NK_DATABUF_DATA(buf), buf->len);
   if (NK_DATABUF_ISALLOC(buf)) {
     NK_FREE(buf->data);
   }

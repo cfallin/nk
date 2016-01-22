@@ -41,10 +41,14 @@ void nk_test_error_report(FILE *out, const char *fmt, ...);
     }                                                                          \
   } while (0)
 
+#define NK_TEST_MACRO_STRING2(s) #s
+#define NK_TEST_MACRO_STRING(s) NK_TEST_MACRO_STRING2(s)
+
 // Test a condition, printing the given condition and failing the suite if not
 // true.
 #define NK_TEST_ASSERT(cond)                                                   \
-  NK_TEST_ASSERT_IMPL(1, cond, "ASSERT FAILED: " #cond)
+  NK_TEST_ASSERT_IMPL(1, cond, "ASSERT FAILED: " __FILE__                      \
+                               ":" NK_TEST_MACRO_STRING(__LINE__) ": " #cond)
 // Test a condition, printing the given error message and failing the test suite
 // if not true.
 #define NK_TEST_ASSERT_MSG(cond, error) NK_TEST_ASSERT_IMPL(1, cond, error)
@@ -55,7 +59,8 @@ void nk_test_error_report(FILE *out, const char *fmt, ...);
 // Test a condition, printing the given condition if not true, but continuing
 // the suite.
 #define NK_TEST_EXPECT(cond)                                                   \
-  NK_TEST_ASSERT_IMPL(0, cond, "EXPECT FAILED: " #cond)
+  NK_TEST_ASSERT_IMPL(0, cond, "EXPECT FAILED: " __FILE__                      \
+                               ":" NK_TEST_MACRO_STRING(__LINE__) ": " #cond)
 // Test a condition, printing the given error message if not true, but
 // continuing the suite.
 #define NK_TEST_EXPECT_MSG(cond, error) NK_TEST_ASSERT_IMPL(0, cond, error)
