@@ -9,8 +9,8 @@ typedef struct nk_databuf {
   size_t len;
   union {
     void *data;
-    char shortbuf[NK_DATABUF_SHORTSIZE];
-  }
+    char shortbuf[NK_DATABUF_SHORTBUF_SIZE];
+  };
 } nk_databuf;
 
 #define NK_DATABUF_LEN(b) ((b)->len)

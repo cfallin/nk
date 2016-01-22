@@ -5,12 +5,12 @@
 #include "queue.h"
 #include "databuf.h"
 
-enum nk_thd_state {
+typedef enum nk_thd_state {
   NK_THD_READY,
   NK_THD_RUNNING,
   NK_THD_WAIT_MSG,
   NK_THD_FINISHED,
-};
+} nk_thd_state;
 
 typedef struct nk_thd {
   void *stack;
@@ -24,9 +24,20 @@ typedef struct nk_thd {
 
 QUEUE_DEFINE(nk_thd, runq);
 
+typedef struct nk_thd_attrs {
+  uint32_t prio;
+  uint8_t preemptable;
+} nk_thd_attrs;
+
+#define NK_THD_ATTR_INIT                                                       \
+  { NK_THD_PRIO_DEFAULT, 0 }
+
 typedef void *(*nk_thd_entrypoint)(nk_thd *self, void *data);
 
-nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data);
+nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
+                        const nk_thd_attrs *attrs);
+nk_status nk_thd_set_attrs(nk_thd *thd, const nk_thd_attrs *attrs);
+nk_status nk_thd_get_attrs(nk_thd *thd, nk_thd_attrs *attrs);
 void nk_thd_yield();
 void nk_thd_exit(void *retval);
 void *nk_thd_join(nk_thd *thd);

@@ -19,23 +19,23 @@ typedef struct queue_entry queue_head;
 #define QUEUE_INSERT_ENTRY_AFTER(pos, entry)                                   \
   do {                                                                         \
     queue_entry *e = (entry);                                                  \
-    e.prev = pos;                                                              \
-    e.next = pos.next;                                                         \
-    e.prev->next = e;                                                          \
-    e.next->prev = e;                                                          \
+    e->prev = pos;                                                             \
+    e->next = pos->next;                                                       \
+    e->prev->next = e;                                                         \
+    e->next->prev = e;                                                         \
   } while (0)
 
-#define QUEUE_REMOVE_ENTRY(pos, entry)                                         \
+#define QUEUE_REMOVE_ENTRY(entry)                                              \
   do {                                                                         \
     queue_entry *e = (entry);                                                  \
-    e.prev->next = e.next;                                                     \
-    e.next->prev = e.prev;                                                     \
+    e->prev->next = e->next;                                                   \
+    e->next->prev = e->prev;                                                   \
   } while (0)
 
 #define QUEUE_OBJ_FROM_ENTRY(type, field, entry)                               \
   ((type *)(((char *)(entry)) - offsetof(type, field)))
 #define QUEUE_ENTRY_FROM_OBJ(type, field, obj)                                 \
-    ((queue_entry*)(((char *)(obj)) + offsetof(type, field))
+  ((queue_entry *)(((char *)(obj)) + offsetof(type, field)))
 
 #define QUEUE_DEFINE(type, field)                                              \
   static void type##_##field##_insert_after(type *pos, type *obj) {            \
