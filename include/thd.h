@@ -138,12 +138,6 @@ struct nk_hostthd {
 
 QUEUE_DEFINE(nk_hostthd, list);
 
-typedef enum {
-  NK_HOST_SHUTDOWN_NONE,          // no shutdown planned.
-  NK_HOST_SHUTDOWN_IMMEDIATE,     // shutdown once all running tasks yield.
-  NK_HOST_SHUTDOWN_WHEN_QUIESCED, // shutdown when all schobs exit.
-} nk_host_shutdown_type;
-
 // Global host context.
 struct nk_host {
   // Global runqueue.
@@ -157,9 +151,7 @@ struct nk_host {
   // Host-thread list. Protected by hostthd_mutex.
   queue_head hostthds;
   // Shutdown flag. Protected under, and signaled by, runq_lock / runq_cond.
-  nk_host_shutdown_type shutdown;
-  // Main DPC.
-  nk_dpc *main_dpc;
+  int shutdown;
 };
 
 /**
@@ -171,7 +163,8 @@ nk_status nk_host_create(nk_host **ret);
  * Runs the host instance, returning after the instance is shut down. The given
  * DPC function/arg is executed as a DPC within the host context, and is the
  * only point from which other threads/DPCs may be created. The host instance
- * will run as long as at least one thread or DPC exists.
+ * will run as long as at least one thread or DPC exists, unless
+ * `nk_host_shutdown()` is called.
  */
 void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data);
 /**
@@ -182,14 +175,10 @@ void nk_host_destroy(nk_host *host);
 
 /**
  * Initiates a shutdown on the given host instance. Should be called while the
- * host is running.
- *
- * If `type` is NK_HOST_SHUTDOWN_WHEN_QUIESCED, workers continue until all
- * threads/DPCs have exited/returned.  Otherwise, if it is
- * NK_HOST_SHUTDOWN_IMMEDIATE, all workers exit as soon as they finish their
- * current task (thread slice or DPC).
+ * host is running. All workers will exit when their schedulers next have
+ * control, i.e., when their current thread yields or DPC returns.
  */
-void nk_host_shutdown(nk_host *host, nk_host_shutdown_type type);
+void nk_host_shutdown(nk_host *host);
 
 // --------------- arch-specific stuff. ------------------
 

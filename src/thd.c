@@ -249,22 +249,7 @@ static void *nk_hostthd_main(void *_self) {
     pthread_mutex_lock(&host->runq_mutex);
     while (1) {
 
-      int do_shutdown = 0;
-      switch (host->shutdown) {
-      case NK_HOST_SHUTDOWN_NONE:
-        break;
-      case NK_HOST_SHUTDOWN_IMMEDIATE:
-        do_shutdown = 1;
-        break;
-      case NK_HOST_SHUTDOWN_WHEN_QUIESCED: {
-        if (host->schob_count == 0) {
-          do_shutdown = 1;
-        }
-        break;
-      }
-      }
-
-      if (do_shutdown) {
+      if (host->shutdown || host->schob_count == 0) {
         pthread_mutex_unlock(&host->runq_mutex);
         goto shutdown;
       }
@@ -293,10 +278,6 @@ static void *nk_hostthd_main(void *_self) {
         nk_dpc_destroy(dpc);
         destroyed = 1;
       }
-      // If this was the main DPC, initiate a shutdown.
-      if (dpc == host->main_dpc) {
-        nk_host_shutdown(host, NK_HOST_SHUTDOWN_WHEN_QUIESCED);
-      }
       break;
     }
     case NK_SCHOB_TYPE_THD: {
@@ -318,9 +299,8 @@ static void *nk_hostthd_main(void *_self) {
       host->schob_count--;
       pthread_mutex_unlock(&host->runq_mutex);
     }
-
     // If `next` is in the READY state, place it back on the runqueue.
-    if (next->state == NK_SCHOB_STATE_READY) {
+    else if (next->state == NK_SCHOB_STATE_READY) {
       pthread_mutex_lock(&host->runq_mutex);
       nk_schob_runq_push(&host->runq, next);
       pthread_mutex_unlock(&host->runq_mutex);
@@ -389,7 +369,6 @@ nk_status nk_host_create(nk_host **ret) {
 
   QUEUE_INIT(&h->runq);
   QUEUE_INIT(&h->hostthds);
-  h->shutdown = NK_HOST_SHUTDOWN_NONE;
 
   *ret = NK_AUTOPTR_STEAL(nk_host, h);
   return NK_OK;
@@ -406,13 +385,14 @@ void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
     nk_hostthd *hostthd;
     nk_status status = nk_hostthd_create(&hostthd, host);
     if (status != NK_OK) {
-      nk_host_shutdown(host, NK_HOST_SHUTDOWN_IMMEDIATE);
+      nk_host_shutdown(host);
       break;
     }
     if (i == 0) {
-      status = nk_dpc_create_(hostthd, &host->main_dpc, main, data, NULL);
+      nk_dpc *main_dpc;
+      status = nk_dpc_create_(hostthd, &main_dpc, main, data, NULL);
       if (status != NK_OK) {
-        nk_host_shutdown(host, NK_HOST_SHUTDOWN_IMMEDIATE);
+        nk_host_shutdown(host);
         break;
       }
     }
@@ -444,11 +424,9 @@ void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
       break;
     }
   }
-
-  nk_dpc_destroy(host->main_dpc);
 }
 
-void nk_host_shutdown(nk_host *host, nk_host_shutdown_type type) {
+void nk_host_shutdown(nk_host *host) {
   pthread_mutex_lock(&host->runq_mutex);
   host->shutdown = 1;
   pthread_cond_broadcast(&host->runq_cond);
@@ -456,9 +434,8 @@ void nk_host_shutdown(nk_host *host, nk_host_shutdown_type type) {
 }
 
 void nk_host_destroy(nk_host *host) {
-  assert(host->shutdown);
+  assert(host->schob_count == 0);
   pthread_cond_destroy(&host->runq_cond);
   pthread_mutex_destroy(&host->runq_mutex);
   NK_FREE(host);
 }
-
