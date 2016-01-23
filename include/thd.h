@@ -15,17 +15,24 @@ typedef enum nk_thd_state {
 typedef struct nk_thd_attrs {
   // Priority: higher is preferred.
   uint32_t prio;
+  // Stack size.
+  uint32_t stacksize;
 } nk_thd_attrs;
 
 #define NK_THD_ATTR_INIT                                                       \
-  { NK_THD_PRIO_DEFAULT }
+  { NK_THD_PRIO_DEFAULT, NK_THD_STACKSIZE_DEFAULT }
 
 #define NK_THD_PRIO_MIN 0
 #define NK_THD_PRIO_DEFAULT 0x80000000
 #define NK_THD_PRIO_MAX 0xffffffff
 
+#define NK_THD_STACKSIZE_MIN 4096
+#define NK_THD_STACKSIZE_DEFAULT 8192
+#define NK_THD_STACKSIZE_MAX (4*1024*1024)
+
 typedef struct nk_thd {
   void *stack;
+  void *stacktop;
   size_t stacklen;
   void *retval;
   nk_thd_state state;
