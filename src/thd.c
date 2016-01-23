@@ -164,6 +164,7 @@ static __attribute__((noreturn)) void nk_thd_entry(void *data1, void *data2,
 nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
                         const nk_thd_attrs *attrs) {
   nk_hostthd *host = nk_hostthd_self();
+  assert(host != NULL);
   nk_status status;
 
   status = NK_ERR_NOMEM;
@@ -271,6 +272,7 @@ err:
 nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data,
                         const nk_dpc_attrs *attrs) {
   nk_hostthd *host = nk_hostthd_self();
+  assert(host != NULL);
   return nk_dpc_create_(host, ret, func, data, attrs);
 }
 
@@ -294,6 +296,9 @@ nk_status nk_dpc_join(nk_dpc *dpc, void **ret) {
 
 static void *nk_hostthd_main(void *_self) {
   nk_hostthd *self = (nk_hostthd *)_self;
+  pthread_once(&nk_hostthd_self_key_once, setup_hostthd_self_key);
+  pthread_setspecific(nk_hostthd_self_key, self);
+
   nk_host *host = self->host;
   while (1) {
     nk_schob *next = NULL;
@@ -313,6 +318,7 @@ static void *nk_hostthd_main(void *_self) {
     // If `next` is a dpc, run it here. If `next` is a thd, context-switch to
     // it until it yields.
     self->running = next;
+    next->state = NK_SCHOB_STATE_RUNNING;
     switch (next->type) {
     case NK_SCHOB_TYPE_DPC: {
       nk_dpc *dpc = (nk_dpc *)next;
@@ -321,6 +327,10 @@ static void *nk_hostthd_main(void *_self) {
       // If `next` is in the ZOMBIE state, clean it up immediately.
       if (dpc->schob.state == NK_SCHOB_STATE_ZOMBIE) {
         nk_dpc_destroy(dpc);
+      }
+      // If this was the main DPC, initiate a shutdown.
+      if (dpc == host->main_dpc) {
+        nk_host_shutdown(host);
       }
       break;
     }
@@ -433,9 +443,7 @@ err:
   return status;
 }
 
-void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
-  nk_dpc *main_dpc;
-
+void *nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
   // Create workers. Create one more 'hidden' worker to run the main DPC.
   for (int i = 0; i < workers + 1; i++) {
     nk_hostthd *hostthd;
@@ -444,7 +452,7 @@ void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
       break;
     }
     if (i == 0) {
-      status = nk_dpc_create_(hostthd, &main_dpc, main, data, NULL);
+      status = nk_dpc_create_(hostthd, &host->main_dpc, main, data, NULL);
       if (status != NK_OK) {
         break;
       }
@@ -462,7 +470,9 @@ void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
     nk_hostthd_join(h);
   }
 
-  nk_dpc_destroy(main_dpc);
+  void *ret = host->main_dpc->schob.retval;
+  nk_dpc_destroy(host->main_dpc);
+  return ret;
 }
 
 void nk_host_shutdown(nk_host *host) {

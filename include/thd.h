@@ -81,12 +81,33 @@ struct nk_thd {
 
 typedef void *(*nk_thd_entrypoint)(nk_thd *self, void *data);
 
+/**
+ * Creates a new thread. Must only be called from within a DPC or thread
+ * context. `attrs` may be NULL.
+ */
 nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
                         const nk_thd_attrs *attrs);
+/**
+ * Yields to the scheduler. Control may return at any time.
+ */
 void nk_thd_yield();
+/**
+ * Exits the thread with the given return value. Control will never return. If a
+ * thread is blocked on a join of this thread, it will be unblocked.
+ */
 void __attribute__((noreturn)) nk_thd_exit(void *retval);
+/**
+ * Joins a thread. Only one join may be performed on a given thread. A join must
+ * be performed on every thread not created in "detached" state. The return
+ * value that the thread body passed to `nk_thd_exit` or returned from its main
+ * function will be placed in `*ret`. Must be called from within a thread
+ * context.
+ */
 nk_status nk_thd_join(nk_thd *thd, void **ret);
-nk_thd *nk_thd_self(); // get the current thread, if any.
+/**
+ * Returns the current thread, or NULL if in DPC or other context.
+ */
+nk_thd *nk_thd_self();
 
 // ------------- dpcs: deferred procedure calls. ----------------
 
@@ -106,9 +127,23 @@ struct nk_dpc {
   void *data;
 };
 
+/**
+ * Create a new DPC (deferred procedure call). It will run exactly once, at some
+ * later time, outside the context of the calling DPC/thread. This function must
+ * be called in the context of another DPC or thread.
+ */
 nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data,
                         const nk_dpc_attrs *attrs);
+/**
+ * Join a DPC (wait for it to finish). This must be called from within a thread
+ * context. A DPC must be joined if and only if it was not created with
+ * "detached" state. Its return value will be placed in `*ret`.
+ */
 nk_status nk_dpc_join(nk_dpc *dpc, void **ret);
+/**
+ * Returns the current DPC context, if any, or NULL if in thread or other
+ * context.
+ */
 nk_dpc *nk_dpc_self(); // get the current dpc, if any.
 
 // ---------- host threads: these run thds and dpcs. ---------------
@@ -139,17 +174,35 @@ struct nk_host {
   queue_head hostthds;
   // Shutdown flag. Protected under, and signaled by, runq_lock / runq_cond.
   int shutdown;
+  // Main DPC.
+  nk_dpc *main_dpc;
 };
 
-// Creates a new host instance.
+/**
+ * Creates a new host instance. This is the kernel context that runs all
+ * threads/DPCs. Multiple host contexts may exist within one program.
+ */
 nk_status nk_host_create(nk_host **ret);
-// runs the host instance, returning after shutdown.
-void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data);
-// called once nk_host_run() returns from main thread.
+/**
+ * Runs the host instance, returning after the instance is shut down. The given
+ * DPC function/arg is executed as a DPC within the host context, and is the
+ * only point from which other threads/DPCs may be created. The main DPC should
+ * join all other non-detached threads/DPCs and then call shutdown() when done
+ * (otherwise resources will leak).
+ *
+ * The return value of the main DPC is returned.
+ */
+void *nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data);
+/**
+ * Destroys the host instance. Must be called only after `nk_host_run()`
+ * returns.
+ */
 void nk_host_destroy(nk_host *host);
 
-// Called while host is running: sets shutdown flag. Must only be called from
-// the main DPC.
+/**
+ * Initiates a shutdown on the given host instance. Should be called while the
+ * host is running.
+ */
 void nk_host_shutdown(nk_host *host);
 
 // --------------- arch-specific stuff. ------------------
