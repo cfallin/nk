@@ -8,6 +8,7 @@ project(nk)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11")
 add_library(nk ${SRCS})
+target_link_libraries(nk pthread)
 
 add_executable(nk_test ${SRCS} ${TEST_SRCS})
 target_link_libraries(nk_test nk)

@@ -20,8 +20,8 @@ typedef enum nk_schob_state {
   NK_SCHOB_STATE_READY,    // on a scheduler run queue.
   NK_SCHOB_STATE_RUNNING,  // actually running in a host thread.
   NK_SCHOB_STATE_WAITING,  // waiting at a port/semaphore.
-  NK_SCHOB_STATE_FINISHED, // finished waiting to be joined.
-  NK_SCHOB_STATE_ZOMBIE,   // zombie waiting to be freed.
+  NK_SCHOB_STATE_FINISHED, // finished, now waiting to be joined.
+  NK_SCHOB_STATE_ZOMBIE,   // zombie, now waiting to be freed.
 } nk_schob_state;
 
 typedef enum nk_schob_type {
@@ -40,10 +40,9 @@ struct nk_schob {
   // running on a host thread?
   nk_hostthd *hostthd;
 
-  // list of threads waiting to join on this schob's completion.
-  queue_head joinq;
-  pthread_spinlock_t joinq_lock;
-  nk_thd *joined; // which thread joined us?
+  // Thread waiting to join. Only one can wait.
+  pthread_spinlock_t join_lock;
+  nk_thd *joined;
 
   uint32_t prio;
 
@@ -140,15 +139,17 @@ struct nk_host {
   queue_head hostthds;
   // Shutdown flag. Protected under, and signaled by, runq_lock / runq_cond.
   int shutdown;
-  // Monitor thread.
-  pthread_t monitor_thd;
 };
 
 // Creates a new host instance.
 nk_status nk_host_create(nk_host **ret);
-// automatically creates host threads as needed.
-void nk_host_run(nk_host *host);
-// called while host is running: sets shutdown flag.
+// runs the host instance, returning after shutdown.
+void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data);
+// called once nk_host_run() returns from main thread.
+void nk_host_destroy(nk_host *host);
+
+// Called while host is running: sets shutdown flag. Must only be called from
+// the main DPC.
 void nk_host_shutdown(nk_host *host);
 
 // --------------- arch-specific stuff. ------------------

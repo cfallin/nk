@@ -13,14 +13,14 @@ typedef struct queue_entry queue_head;
 
 #define QUEUE_INIT(head)                                                       \
   do {                                                                         \
-    head.next = &head;                                                         \
-    head.prev = &head;                                                         \
+    (head)->next = (head);                                                     \
+    (head)->prev = (head);                                                     \
   } while (0)
 #define QUEUE_INSERT_ENTRY_AFTER(pos, entry)                                   \
   do {                                                                         \
     queue_entry *e = (entry);                                                  \
-    e->prev = pos;                                                             \
-    e->next = pos->next;                                                       \
+    e->prev = (pos);                                                           \
+    e->next = (pos)->next;                                                     \
     e->prev->next = e;                                                         \
     e->next->prev = e;                                                         \
   } while (0)
