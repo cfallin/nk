@@ -297,6 +297,9 @@ static void *nk_hostthd_main(void *_self) {
     if (destroyed) {
       pthread_mutex_lock(&host->runq_mutex);
       host->schob_count--;
+      if (host->schob_count == 0) {
+          pthread_cond_broadcast(&host->runq_cond);
+      }
       pthread_mutex_unlock(&host->runq_mutex);
     }
     // If `next` is in the READY state, place it back on the runqueue.

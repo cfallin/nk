@@ -60,4 +60,5 @@ nk_arch_switch_ctx:
     popq %r13
     popq %r14
     popq %r15
+    popq %rbp
     retq
