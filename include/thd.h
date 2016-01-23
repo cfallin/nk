@@ -17,11 +17,10 @@ typedef struct nk_hostthd nk_hostthd;
 // -------------- schobs: schedulable entities. --------------
 
 typedef enum nk_schob_state {
-  NK_SCHOB_STATE_READY,    // on a scheduler run queue.
-  NK_SCHOB_STATE_RUNNING,  // actually running in a host thread.
-  NK_SCHOB_STATE_WAITING,  // waiting at a port/semaphore.
-  NK_SCHOB_STATE_FINISHED, // finished, now waiting to be joined.
-  NK_SCHOB_STATE_ZOMBIE,   // zombie, now waiting to be freed.
+  NK_SCHOB_STATE_READY,   // on a scheduler run queue.
+  NK_SCHOB_STATE_RUNNING, // actually running in a host thread.
+  NK_SCHOB_STATE_WAITING, // waiting at a port/semaphore.
+  NK_SCHOB_STATE_ZOMBIE,  // zombie, now waiting to be freed.
 } nk_schob_state;
 
 typedef enum nk_schob_type {
@@ -33,32 +32,6 @@ struct nk_schob {
   nk_schob_state state;
   nk_schob_type type;
 
-  // State lock: protects `state`, `joiner` and `joined`. Whenever lock is not
-  // held, the schob must be in one of the following states:
-  // - RUNNING and running (or about to be run, or just returned from running)
-  //   on some host thread, and not on runq.
-  // - READY and on the runq.
-  // - WAITING and on a port or semaphore's runq or waiting to join a schob.
-  // - FINISHED and not on any runq.
-  // - ZOMBIE and owned by the hostthd that transitioned it to that state, about
-  //   to be freed.
-  //
-  // Furthermore, when the lock is not held, one of the following is true:
-  // - `joiner` and `joined` are both NULL/zero respectively.
-  // - `joiner` is set to a joining thread, that thread is in WAITING state,
-  //   and this schob is not in FINISHED state.
-  // - `joiner` is set to a joining thread, that thread has been moved to READY
-  //   state and will soon be placed on the runqueue (if transitioned by the
-  //   schob becoming ready) or is already running (if joiner finds schob in
-  //   finished state already), this schob is in FINISHED state, and `joined`
-  //   is set to one (true).
-  //
-  // When two locks must be taken on two schobs, they are always locked in
-  // address order and unlocked in reverse address order.
-  //
-  // All schob locks are ordered after the runq mutex.
-  pthread_spinlock_t lock;
-
   // on a global scheduler queue, host-thread queue, msg or sem queue, join
   // queue, or cleanup queue.
   queue_entry runq;
@@ -66,16 +39,7 @@ struct nk_schob {
   // running on a host thread?
   nk_hostthd *hostthd;
 
-  // Thread waiting to join. Only one can wait. `joiner` is set when a joiner
-  // claims this object to join. `joined` is set when the joiner has returned
-  // -- it is used to wake up the joiner exactly once, only if needed.
-  nk_thd *joiner;
-  int joined;
-
   uint32_t prio;
-
-  void *retval;
-  int detached; // do we become a zombie (true) or will we be joined (false)?
 };
 
 QUEUE_DEFINE(nk_schob, runq);
@@ -90,7 +54,6 @@ struct nk_thd_attrs {
   // Stack size.
   uint32_t stacksize;
   uint32_t prio;
-  int detached;
 };
 
 #define NK_THD_ATTRS_INIT                                                      \
@@ -107,7 +70,7 @@ struct nk_thd {
   size_t stacklen; // actual stacklen, as opposed to attrs-specified len.
 };
 
-typedef void *(*nk_thd_entrypoint)(nk_thd *self, void *data);
+typedef void (*nk_thd_entrypoint)(nk_thd *self, void *data);
 
 /**
  * Creates a new thread. Must only be called from within a DPC or thread
@@ -120,18 +83,9 @@ nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
  */
 void nk_thd_yield();
 /**
- * Exits the thread with the given return value. Control will never return. If a
- * thread is blocked on a join of this thread, it will be unblocked.
+ * Exits the thread. Control will never return.
  */
-void __attribute__((noreturn)) nk_thd_exit(void *retval);
-/**
- * Joins a thread. Only one join may be performed on a given thread. A join must
- * be performed on every thread not created in "detached" state. The return
- * value that the thread body passed to `nk_thd_exit` or returned from its main
- * function will be placed in `*ret`. Must be called from within a thread
- * context.
- */
-nk_status nk_thd_join(nk_thd *thd, void **ret);
+void __attribute__((noreturn)) nk_thd_exit();
 /**
  * Returns the current thread, or NULL if in DPC or other context.
  */
@@ -141,13 +95,12 @@ nk_thd *nk_thd_self();
 
 struct nk_dpc_attrs {
   uint32_t prio;
-  int detached;
 };
 
 #define NK_DPC_ATTRS_INIT                                                      \
   { NK_PRIO_DEFAULT, 0 }
 
-typedef void *(*nk_dpc_func)(void *data);
+typedef void (*nk_dpc_func)(void *data);
 
 struct nk_dpc {
   nk_schob schob; // parent class
@@ -162,12 +115,6 @@ struct nk_dpc {
  */
 nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data,
                         const nk_dpc_attrs *attrs);
-/**
- * Join a DPC (wait for it to finish). This must be called from within a thread
- * context. A DPC must be joined if and only if it was not created with
- * "detached" state. Its return value will be placed in `*ret`.
- */
-nk_status nk_dpc_join(nk_dpc *dpc, void **ret);
 /**
  * Returns the current DPC context, if any, or NULL if in thread or other
  * context.
@@ -191,22 +138,26 @@ struct nk_hostthd {
 
 QUEUE_DEFINE(nk_hostthd, list);
 
+typedef enum {
+  NK_HOST_SHUTDOWN_NONE,          // no shutdown planned.
+  NK_HOST_SHUTDOWN_IMMEDIATE,     // shutdown once all running tasks yield.
+  NK_HOST_SHUTDOWN_WHEN_QUIESCED, // shutdown when all schobs exit.
+} nk_host_shutdown_type;
+
 // Global host context.
 struct nk_host {
   // Global runqueue.
   pthread_mutex_t runq_mutex;
   pthread_cond_t runq_cond;
   queue_head runq;
-  // How many running DPCs? We need at least one more hostthd than this in
-  // order to avoid deadlock. Protected by runq_mutex.
-  int running_dpc_count;
-  // How many host-threads are active? Protected by hostthd_mutex.
+  // How many threads and DPCs exist in total?
+  int schob_count;
+  // How many host-threads exist? Protected by runq_mutex.
   int hostthd_count;
-  // Host-thread list.
-  pthread_mutex_t hostthd_mutex;
+  // Host-thread list. Protected by hostthd_mutex.
   queue_head hostthds;
   // Shutdown flag. Protected under, and signaled by, runq_lock / runq_cond.
-  int shutdown;
+  nk_host_shutdown_type shutdown;
   // Main DPC.
   nk_dpc *main_dpc;
 };
@@ -219,13 +170,10 @@ nk_status nk_host_create(nk_host **ret);
 /**
  * Runs the host instance, returning after the instance is shut down. The given
  * DPC function/arg is executed as a DPC within the host context, and is the
- * only point from which other threads/DPCs may be created. The main DPC should
- * join all other non-detached threads/DPCs and then call shutdown() when done
- * (otherwise resources will leak).
- *
- * The return value of the main DPC is returned.
+ * only point from which other threads/DPCs may be created. The host instance
+ * will run as long as at least one thread or DPC exists.
  */
-void *nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data);
+void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data);
 /**
  * Destroys the host instance. Must be called only after `nk_host_run()`
  * returns.
@@ -235,8 +183,13 @@ void nk_host_destroy(nk_host *host);
 /**
  * Initiates a shutdown on the given host instance. Should be called while the
  * host is running.
+ *
+ * If `type` is NK_HOST_SHUTDOWN_WHEN_QUIESCED, workers continue until all
+ * threads/DPCs have exited/returned.  Otherwise, if it is
+ * NK_HOST_SHUTDOWN_IMMEDIATE, all workers exit as soon as they finish their
+ * current task (thread slice or DPC).
  */
-void nk_host_shutdown(nk_host *host);
+void nk_host_shutdown(nk_host *host, nk_host_shutdown_type type);
 
 // --------------- arch-specific stuff. ------------------
 
