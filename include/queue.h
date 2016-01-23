@@ -38,6 +38,9 @@ typedef struct queue_entry queue_head;
   ((queue_entry *)(((char *)(obj)) + offsetof(type, field)))
 
 #define QUEUE_DEFINE(type, field)                                              \
+  static void type##_##field##_remove(type *obj) {                             \
+    QUEUE_REMOVE_ENTRY(QUEUE_ENTRY_FROM_OBJ(type, field, obj));                \
+  }                                                                            \
   static void type##_##field##_insert_after(type *pos, type *obj) {            \
     QUEUE_INSERT_ENTRY_AFTER(QUEUE_ENTRY_FROM_OBJ(type, field, pos),           \
                              QUEUE_ENTRY_FROM_OBJ(type, field, obj));          \

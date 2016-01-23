@@ -7,10 +7,11 @@
 
 typedef enum nk_status {
   NK_OK,
-  NK_ERR_STATE,    // invalid state
-  NK_ERR_PARAM,    // invalid parameter
-  NK_ERR_NOMEM,    // no memory
-  NK_ERROR_UNIMPL, // not implemented
+  NK_ERR_STATE,  // invalid state
+  NK_ERR_PARAM,  // invalid parameter
+  NK_ERR_NOMEM,  // no memory
+  NK_ERR_UNIMPL, // not implemented
+  NK_ERR_NOJOIN, // thread already joined
 } nk_status;
 
 void nk_init();
