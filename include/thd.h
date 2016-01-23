@@ -48,6 +48,9 @@ QUEUE_DEFINE(nk_schob, runq);
 #define NK_PRIO_DEFAULT 0x80000000
 #define NK_PRIO_MAX 0xffffffff
 
+// Internal -- used by msg code.
+void nk_schob_enqueue(nk_host *host, nk_schob *schob, int new_schob);
+
 // ----------------- thds: conventional green threads. ------------
 
 struct nk_thd_attrs {
@@ -68,6 +71,7 @@ struct nk_thd {
   void *stack;
   void *stacktop;
   size_t stacklen; // actual stacklen, as opposed to attrs-specified len.
+  void *recvslot;  // received msg when woken up from a port recv queue.
 };
 
 typedef void (*nk_thd_entrypoint)(nk_thd *self, void *data);
@@ -137,6 +141,9 @@ struct nk_hostthd {
 };
 
 QUEUE_DEFINE(nk_hostthd, list);
+
+// Internal use only.
+nk_hostthd *nk_hostthd_self();
 
 // Global host context.
 struct nk_host {

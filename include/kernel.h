@@ -11,7 +11,7 @@ typedef enum nk_status {
   NK_ERR_PARAM,  // invalid parameter
   NK_ERR_NOMEM,  // no memory
   NK_ERR_UNIMPL, // not implemented
-  NK_ERR_NOJOIN, // thread already joined
+  NK_ERR_NORECV, // no DPC receiver set up on port
 } nk_status;
 
 void nk_init();

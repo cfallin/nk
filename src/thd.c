@@ -13,7 +13,7 @@ void setup_hostthd_self_key() {
   pthread_key_create(&nk_hostthd_self_key, NULL);
 }
 
-static nk_hostthd *nk_hostthd_self() {
+nk_hostthd *nk_hostthd_self() {
   pthread_once(&nk_hostthd_self_key_once, setup_hostthd_self_key);
   return (nk_hostthd *)pthread_getspecific(nk_hostthd_self_key);
 }
@@ -71,7 +71,7 @@ static nk_schob *nk_schob_next(nk_host *host) {
 }
 
 // This enqueues a schob onto the runqueue. It assumes no locks are held.
-static void nk_schob_enqueue(nk_host *host, nk_schob *schob, int new_schob) {
+void nk_schob_enqueue(nk_host *host, nk_schob *schob, int new_schob) {
   pthread_mutex_lock(&host->runq_mutex);
   nk_schob_runq_push(&host->runq, schob);
   if (new_schob) {
