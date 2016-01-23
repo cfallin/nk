@@ -18,6 +18,26 @@ static nk_hostthd *nk_hostthd_self() {
   return (nk_hostthd *)pthread_getspecific(nk_hostthd_self_key);
 }
 
+static void lock_two(pthread_spinlock_t *first, pthread_spinlock_t *second) {
+  if (second < first) {
+    pthread_spinlock_t *tmp = second;
+    second = first;
+    first = tmp;
+  }
+  pthread_spin_lock(&first);
+  pthread_spin_lock(&second);
+}
+
+static void unlock_two(pthread_spinlock_t *first, pthread_spinlock_t *second) {
+  if (second < first) {
+    pthread_spinlock_t *tmp = second;
+    second = first;
+    first = tmp;
+  }
+  pthread_spin_unlock(&second);
+  pthread_spin_unlock(&first);
+}
+
 nk_thd *nk_thd_self() {
   nk_hostthd *host = nk_hostthd_self();
   if (!host || !host->running) {
@@ -47,7 +67,7 @@ static nk_status nk_schob_init(nk_schob *schob, nk_schob_type type,
   // All fields zeroed on entry.
   schob->state = NK_SCHOB_STATE_READY;
   schob->type = type;
-  if (pthread_spin_init(&schob->join_lock, PTHREAD_PROCESS_PRIVATE)) {
+  if (pthread_spin_init(&schob->lock, PTHREAD_PROCESS_PRIVATE)) {
     return NK_ERR_NOMEM;
   }
   schob->prio = prio;
@@ -56,13 +76,32 @@ static nk_status nk_schob_init(nk_schob *schob, nk_schob_type type,
 }
 
 static void nk_schob_destroy(nk_schob *schob) {
-  pthread_spin_destroy(&schob->join_lock);
+  pthread_spin_destroy(&schob->lock);
 }
 
-static void nk_schob_setdone(nk_schob *schob, void *retval) {
+// Returns a new schob that needs to be enqueued, or none.
+static nk_schob *nk_schob_setdone(nk_host *host, nk_schob *schob,
+                                  void *retval) {
   schob->retval = retval;
+  if (schob->type == NK_SCHOB_DPC) {
+    pthread_mutex_lock(&host->runq_mutex);
+    host->running_dpc_count--;
+    pthread_mutex_unlock(&host->runq_mutex);
+  }
+
+  pthread_spin_lock(&schob->lock);
   schob->state =
       schob->detached ? NK_SCHOB_STATE_ZOMBIE : NK_SCHOB_STATE_FINISHED;
+
+  // If `schob` is in the FINISHED state, wake up its joiner, if any.
+  if (schob->state == NK_SCHOB_STATE_FINISHED) {
+    if (next->joiner && !next->joined) {
+      next->joiner->schob.state = NK_SCHOB_STATE_READY;
+      needs_enqueue = 1;
+    }
+  }
+
+  pthread_spin_unlock(&schob->lock);
 }
 
 static nk_status nk_schob_join(nk_thd *self, nk_schob *joined) {
@@ -70,28 +109,35 @@ static nk_status nk_schob_join(nk_thd *self, nk_schob *joined) {
     return NK_ERR_PARAM;
   }
 
-  // Atomically take the join slot on this object, and return immediately if it
-  // has already finished.
-  pthread_spin_lock(&joined->join_lock);
-  if (joined->joined) {
-    pthread_spin_unlock(&joined->join_lock);
+  // Take the lock on both this thd and the schob we're joining.
+  lock_two(&self->schob.lock, &joined->lock);
+
+  if (joined->joiner) {
+    // Another joiner already joined -- error (and race condition: we're
+    // lucky we got here before original joiner freed `joined`).
+    unlock_two(&self->schob.lock, &joined->lock);
     return NK_ERR_NOJOIN;
   }
-  joined->joined = self;
+
+  joined->joiner = self;
   if (joined->state == NK_SCHOB_STATE_FINISHED) {
+    // Already finished -- we continue running.
+    joined->joined = 1;
+    unlock_two(&self->schob.lock, &joined->lock);
     return NK_OK;
   }
-  pthread_spin_unlock(&joined->join_lock);
 
   // Otherwise, block in the WAITING state until the object reaches FINISHED.
   while (1) {
     self->schob.state = NK_SCHOB_STATE_WAITING;
+    unlock_two(&self->schob.lock, &joined->lock);
     nk_thd_yield();
-    pthread_spin_lock(&joined->join_lock);
+    lock_two(&self->schob.lock, &joined->lock);
     if (joined->state == NK_SCHOB_STATE_FINISHED) {
+      joined->joined = 1;
+      unlock_two(&self->schob.lock, &joined->lock);
       break;
     }
-    pthread_spin_unlock(&joined->join_lock);
   }
 
   return NK_OK;
@@ -208,7 +254,9 @@ static void nk_thd_destroy(nk_thd *t) {
 
 void nk_thd_yield() {
   nk_hostthd *host = nk_hostthd_self();
+  assert(host != NULL);
   nk_thd *self = nk_thd_self();
+  assert(self != NULL);
   // Set state to "ready" -- this communicates to host thread to place us back
   // on the run-queue.
   self->schob.state = NK_SCHOB_STATE_READY;
@@ -218,8 +266,10 @@ void nk_thd_yield() {
 
 void nk_thd_exit(void *retval) {
   nk_hostthd *host = nk_hostthd_self();
+  assert(host != NULL);
   nk_thd *self = nk_thd_self();
-  nk_schob_setdone((nk_schob *)self, retval);
+  assert(self != NULL);
+  nk_schob_setdone(host->host, (nk_schob *)self, retval);
   // Should never return.
   nk_arch_switch_ctx(&self->stacktop, host->hoststack);
   while (1) {
@@ -229,6 +279,7 @@ void nk_thd_exit(void *retval) {
 
 nk_status nk_thd_join(nk_thd *thd, void **ret) {
   nk_thd *self = nk_thd_self();
+  assert(self != NULL);
   nk_status err = nk_schob_join(self, (nk_schob *)thd);
   if (err != NK_OK) {
     return err;
@@ -283,6 +334,7 @@ static void nk_dpc_destroy(nk_dpc *dpc) {
 
 nk_status nk_dpc_join(nk_dpc *dpc, void **ret) {
   nk_thd *self = nk_thd_self();
+  assert(self != NULL);
   nk_status err = nk_schob_join(self, (nk_schob *)dpc);
   if (err != NK_OK) {
     return err;
@@ -305,6 +357,7 @@ static void *nk_hostthd_main(void *_self) {
     pthread_mutex_lock(&host->runq_mutex);
     while (1) {
       if (host->shutdown) {
+        pthread_mutex_unlock(&host->runq_mutex);
         goto shutdown;
       }
       next = nk_schob_next(host);
@@ -312,6 +365,9 @@ static void *nk_hostthd_main(void *_self) {
         break;
       }
       pthread_cond_wait(&host->runq_cond, &host->runq_mutex);
+    }
+    if (next->type == NK_SCHOB_TYPE_DPC) {
+      host->running_dpc_count++;
     }
     pthread_mutex_unlock(&host->runq_mutex);
 
@@ -323,7 +379,7 @@ static void *nk_hostthd_main(void *_self) {
     case NK_SCHOB_TYPE_DPC: {
       nk_dpc *dpc = (nk_dpc *)next;
       void *ret = dpc->func(dpc->data);
-      nk_schob_setdone(next, ret);
+      nk_schob_setdone(host, next, ret);
       // If `next` is in the ZOMBIE state, clean it up immediately.
       if (dpc->schob.state == NK_SCHOB_STATE_ZOMBIE) {
         nk_dpc_destroy(dpc);
@@ -345,17 +401,6 @@ static void *nk_hostthd_main(void *_self) {
     }
     }
     self->running = NULL;
-
-    // If `next` is in the FINISHED state, wake up all of its joiners (but
-    // grant only one of them the join).
-    if (next->state == NK_SCHOB_STATE_FINISHED) {
-      pthread_spin_lock(&next->join_lock);
-      if (next->joined) {
-        next->joined->schob.state = NK_SCHOB_STATE_READY;
-        nk_schob_enqueue(host, (nk_schob *)next->joined);
-      }
-      pthread_spin_unlock(&next->join_lock);
-    }
 
     // If `next` is in the READY state, place it back on the runqueue.
     if (next->state == NK_SCHOB_STATE_READY) {
@@ -386,6 +431,7 @@ static nk_status nk_hostthd_create(nk_hostthd **ret, nk_host *host) {
 
   pthread_mutex_lock(&host->hostthd_mutex);
   nk_hostthd_list_push(&host->hostthds, h);
+  host->hostthd_count++;
   pthread_mutex_unlock(&host->hostthd_mutex);
 
   *ret = NK_AUTOPTR_STEAL(nk_hostthd, h);
@@ -400,6 +446,7 @@ static void nk_hostthd_join(nk_hostthd *thd) {
   pthread_join(thd->pthread, &retval);
   pthread_mutex_lock(&thd->host->hostthd_mutex);
   nk_hostthd_list_remove(thd);
+  host->hostthd_count--;
   pthread_mutex_unlock(&thd->host->hostthd_mutex);
   NK_FREE(thd);
 }
@@ -449,11 +496,13 @@ void *nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
     nk_hostthd *hostthd;
     nk_status status = nk_hostthd_create(&hostthd, host);
     if (status != NK_OK) {
+      nk_host_shutdown(host);
       break;
     }
     if (i == 0) {
       status = nk_dpc_create_(hostthd, &host->main_dpc, main, data, NULL);
       if (status != NK_OK) {
+        nk_host_shutdown(host);
         break;
       }
     }
@@ -463,11 +512,27 @@ void *nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
   while (1) {
     pthread_mutex_lock(&host->hostthd_mutex);
     if (nk_hostthd_list_empty(&host->hostthds)) {
+      pthread_mutex_unlock(&host->hostthd_mutex);
       break;
     }
     nk_hostthd *h = nk_hostthd_list_shift(&host->hostthds);
     pthread_mutex_unlock(&host->hostthd_mutex);
     nk_hostthd_join(h);
+  }
+
+  // Destroy any remaining thds/DPCs on runq.
+  for (nk_schob *s = nk_schob_runq_begin(&host->runq),
+                *e = nk_schob_runq_end(&host->runq), *next = NULL;
+       s != e; s = next) {
+    next = nk_schob_runq_next(s);
+    switch (s->type) {
+    case NK_SCHOB_TYPE_THD:
+      nk_thd_destroy((nk_thd *)s);
+      break;
+    case NK_SCHOB_TYPE_DPC:
+      nk_dpc_destroy((nk_dpc *)s);
+      break;
+    }
   }
 
   void *ret = host->main_dpc->schob.retval;

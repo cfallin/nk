@@ -6,6 +6,8 @@ static void *thd_create_main_dpc(void *arg) {
   int *flag = arg;
   *flag = 42;
   return (flag + 1);
+
+  nk_dpc* childdpc;
 }
 
 NK_TEST(thd_create) {

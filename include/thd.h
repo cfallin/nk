@@ -33,6 +33,32 @@ struct nk_schob {
   nk_schob_state state;
   nk_schob_type type;
 
+  // State lock: protects `state`, `joiner` and `joined`. Whenever lock is not
+  // held, the schob must be in one of the following states:
+  // - RUNNING and running (or about to be run, or just returned from running)
+  //   on some host thread, and not on runq.
+  // - READY and on the runq.
+  // - WAITING and on a port or semaphore's runq or waiting to join a schob.
+  // - FINISHED and not on any runq.
+  // - ZOMBIE and owned by the hostthd that transitioned it to that state, about
+  //   to be freed.
+  //
+  // Furthermore, when the lock is not held, one of the following is true:
+  // - `joiner` and `joined` are both NULL/zero respectively.
+  // - `joiner` is set to a joining thread, that thread is in WAITING state,
+  //   and this schob is not in FINISHED state.
+  // - `joiner` is set to a joining thread, that thread has been moved to READY
+  //   state and will soon be placed on the runqueue (if transitioned by the
+  //   schob becoming ready) or is already running (if joiner finds schob in
+  //   finished state already), this schob is in FINISHED state, and `joined`
+  //   is set to one (true).
+  //
+  // When two locks must be taken on two schobs, they are always locked in
+  // address order and unlocked in reverse address order.
+  //
+  // All schob locks are ordered after the runq mutex.
+  pthread_spinlock_t lock;
+
   // on a global scheduler queue, host-thread queue, msg or sem queue, join
   // queue, or cleanup queue.
   queue_entry runq;
@@ -40,9 +66,11 @@ struct nk_schob {
   // running on a host thread?
   nk_hostthd *hostthd;
 
-  // Thread waiting to join. Only one can wait.
-  pthread_spinlock_t join_lock;
-  nk_thd *joined;
+  // Thread waiting to join. Only one can wait. `joiner` is set when a joiner
+  // claims this object to join. `joined` is set when the joiner has returned
+  // -- it is used to wake up the joiner exactly once, only if needed.
+  nk_thd *joiner;
+  int joined;
 
   uint32_t prio;
 
@@ -169,6 +197,11 @@ struct nk_host {
   pthread_mutex_t runq_mutex;
   pthread_cond_t runq_cond;
   queue_head runq;
+  // How many running DPCs? We need at least one more hostthd than this in
+  // order to avoid deadlock. Protected by runq_mutex.
+  int running_dpc_count;
+  // How many host-threads are active? Protected by hostthd_mutex.
+  int hostthd_count;
   // Host-thread list.
   pthread_mutex_t hostthd_mutex;
   queue_head hostthds;
