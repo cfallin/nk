@@ -5,12 +5,22 @@
 #include "queue.h"
 #include "databuf.h"
 
+typedef enum {
+    NK_PORT_DPC,
+    NK_PORT_THD,
+} nk_port_type;
+
+typedef struct nk_port {
+    queue_head inbox;
+    nk_port_type type;
+} nk_port;
+
 typedef struct nk_msg {
-  nk_thd *src;
-  nk_thd *dest;
+  nk_por *src;
+  nk_port *dest;
   queue_entry mailboxq;
   nk_databuf data;
-};
+} nk_msg;
 
 nk_status nk_msg_new(nk_msg **ret);
 void nk_msg_free(nk_msg *msg);
