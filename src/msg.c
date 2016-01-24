@@ -95,8 +95,8 @@ nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
       pthread_spin_unlock(&port->lock);
       t->recvslot = msg;
       t->schob.state = NK_SCHOB_STATE_READY;
-      printf("msg_send: sending msg %p to thread %p (old state %d)\n", msg, t,
-             t->schob.state);
+      //printf("msg_send: sending msg %p to thread %p (old state %d)\n", msg, t,
+      //       t->schob.state);
       nk_schob_enqueue(host, (nk_schob *)t, /* new_schob = */ 0);
       return NK_OK;
     } else {
@@ -123,9 +123,9 @@ nk_status nk_msg_recv(nk_port *port, nk_msg **ret) {
   } else {
     nk_schob_runq_push(&port->thds, (nk_schob *)self);
     pthread_spin_unlock(&port->lock);
-    printf("msg_recv: thd %p going to sleep\n", self);
-    nk_thd_yield_ext(NK_SCHOB_STATE_WAITING);
-    printf("msg_recv: thd %p woke up\n", self);
+    //printf("msg_recv: thd %p going to sleep\n", self);
+    nk_thd_yield_ext(NK_THD_YIELD_REASON_WAITING);
+    //printf("msg_recv: thd %p woke up\n", self);
     assert(self->recvslot);
     *ret = self->recvslot;
     self->recvslot = NULL;

@@ -32,6 +32,7 @@ trampoline:
 nk_arch_create_ctx:
     # Align stack to 16-byte boundary.
     andq $-15, %rdi
+    subq $8, %rdi
     # push a fake return address, and a null word to align stack.
     subq $16, %rdi
     movq $0, 8(%rdi)

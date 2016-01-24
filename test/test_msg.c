@@ -48,6 +48,8 @@ NK_TEST(msg_cross_messages) {
   NK_TEST_ASSERT(nk_thd_create_ext(h, &thd2, msg_cross_messages_thd, &arg2,
                                    NULL) == NK_OK);
   nk_host_run(h, 2, NULL, NULL);
+  nk_port_destroy(arg2.this_port);
+  nk_port_destroy(arg1.this_port);
   nk_host_destroy(h);
 
   NK_TEST_ASSERT(arg1.flag1 == 42);
@@ -74,6 +76,7 @@ static void msg_ring_thd(nk_thd *self, void *_arg) {
       return;
     }
     if (arg->is_last && i == (kIters - 1)) {
+      nk_msg_destroy(m);
       break;
     }
     if (nk_msg_send(arg->next_port, arg->this_port, m->data1, m->data2) !=
@@ -117,10 +120,14 @@ NK_TEST(msg_ring) {
   NK_TEST_ASSERT(nk_dpc_create_ext(h, &startdpc, msg_ring_start_dpc, ports[0],
                                    NULL) == NK_OK);
 
-  nk_host_run(h, 1, NULL, NULL);
+  nk_host_run(h, 16, NULL, NULL);
 
   for (int i = 0; i < kRingSize; i++) {
     NK_TEST_ASSERT(args[i].done_flag == 1);
+  }
+
+  for (int i = 0; i < kRingSize; i++) {
+    nk_port_destroy(ports[i]);
   }
 
   nk_host_destroy(h);

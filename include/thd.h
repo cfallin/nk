@@ -96,7 +96,14 @@ nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
 void nk_thd_yield();
 
 // Internal only.
-void nk_thd_yield_ext(nk_schob_state new_state);
+typedef enum {
+  NK_THD_YIELD_REASON_READY,
+  NK_THD_YIELD_REASON_ZOMBIE,
+  NK_THD_YIELD_REASON_WAITING,
+} nk_thd_yield_reason;
+
+// Internal only.
+void nk_thd_yield_ext(nk_thd_yield_reason r);
 
 /**
  * Exits the thread. Control will never return.
@@ -216,6 +223,7 @@ void nk_host_shutdown(nk_host *host);
 void *nk_arch_create_ctx(void *stacktop,
                          void (*entry)(void *data1, void *data2, void *data3),
                          void *data1, void *data2, void *data3);
-int nk_arch_switch_ctx(void **fromstack, void *tostack, int msg);
+nk_thd_yield_reason nk_arch_switch_ctx(void **fromstack, void *tostack,
+                                       nk_thd_yield_reason r);
 
 #endif // __NK_THD_H__
