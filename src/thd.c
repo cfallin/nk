@@ -175,17 +175,20 @@ static void nk_thd_destroy(nk_thd *t) {
   NK_FREE(t);
 }
 
-void nk_thd_yield() {
+void nk_thd_yield_ext(nk_schob_state new_state) {
   nk_hostthd *host = nk_hostthd_self();
   assert(host != NULL);
   nk_thd *self = nk_thd_self();
   assert(self != NULL);
-  // Set state to "ready" -- this communicates to host thread to place us back
-  // on the run-queue.
-  self->schob.state = NK_SCHOB_STATE_READY;
   // Context-switch back to host thread, which will schedule the next item.
-  nk_arch_switch_ctx(&self->stacktop, host->hoststack);
+  printf("yield: about to switch to rip %016lx\n",
+         *(uint64_t *)((uint8_t *)host->hoststack + 48));
+  nk_arch_switch_ctx(&self->stacktop, host->hoststack,
+                     /* place back in runq = */ new_state ==
+                         NK_SCHOB_STATE_READY);
 }
+
+void nk_thd_yield() { nk_thd_yield_ext(NK_SCHOB_STATE_READY); }
 
 void nk_thd_exit() {
   nk_hostthd *host = nk_hostthd_self();
@@ -194,7 +197,10 @@ void nk_thd_exit() {
   assert(self != NULL);
   nk_schob_setdone(host->host, (nk_schob *)self);
   // Should never return.
-  nk_arch_switch_ctx(&self->stacktop, host->hoststack);
+  printf("exit: about to switch to rip %016lx\n",
+         *(uint64_t *)((uint8_t *)host->hoststack + 48));
+  nk_arch_switch_ctx(&self->stacktop, host->hoststack,
+                     /* place back in runq = */ 0);
   while (1) {
     assert(0);
   }
@@ -272,8 +278,13 @@ static void *nk_hostthd_main(void *_self) {
     // If `next` is a dpc, run it here. If `next` is a thd, context-switch to
     // it until it yields.
     self->running = next;
+    printf("hostthd %p: schob %p came off runq with state %d\n", self, next,
+           next->state);
     next->state = NK_SCHOB_STATE_RUNNING;
+
     int destroyed = 0;
+    int insert_into_runq = 0;
+
     switch (next->type) {
     case NK_SCHOB_TYPE_DPC: {
       nk_dpc *dpc = (nk_dpc *)next;
@@ -288,9 +299,14 @@ static void *nk_hostthd_main(void *_self) {
     }
     case NK_SCHOB_TYPE_THD: {
       nk_thd *thd = (nk_thd *)next;
-      nk_arch_switch_ctx(&self->hoststack, thd->stacktop);
+      printf("hostthd %p switching to thd %p\n", self, thd);
+      printf("hostthd: about to switch to rip %016lx\n",
+             *(uint64_t *)((uint8_t *)thd->stacktop + 48));
+      insert_into_runq = nk_arch_switch_ctx(&self->hoststack, thd->stacktop, 0);
+      printf("hostthd %p got control back from thd %p with state %d\n", self,
+             thd, next->state);
       // If `next` is in the ZOMBIE state, clean it up immediately.
-      if (thd->schob.state == NK_SCHOB_STATE_ZOMBIE) {
+      if (next->state == NK_SCHOB_STATE_ZOMBIE) {
         nk_thd_destroy(thd);
         destroyed = 1;
       }
@@ -309,7 +325,7 @@ static void *nk_hostthd_main(void *_self) {
       pthread_mutex_unlock(&host->runq_mutex);
     }
     // If `next` is in the READY state, place it back on the runqueue.
-    else if (next->state == NK_SCHOB_STATE_READY) {
+    else if (insert_into_runq) {
       pthread_mutex_lock(&host->runq_mutex);
       nk_schob_runq_push(&host->runq, next);
       pthread_mutex_unlock(&host->runq_mutex);

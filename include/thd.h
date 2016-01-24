@@ -29,8 +29,8 @@ typedef enum nk_schob_type {
 } nk_schob_type;
 
 struct nk_schob {
-  nk_schob_state state;
   nk_schob_type type;
+  nk_schob_state state;
 
   // on a global scheduler queue, host-thread queue, msg or sem queue, join
   // queue, or cleanup queue.
@@ -94,6 +94,10 @@ nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
  * Yields to the scheduler. Control may return at any time.
  */
 void nk_thd_yield();
+
+// Internal only.
+void nk_thd_yield_ext(nk_schob_state new_state);
+
 /**
  * Exits the thread. Control will never return.
  */
@@ -166,6 +170,10 @@ struct nk_host {
   pthread_mutex_t runq_mutex;
   pthread_cond_t runq_cond;
   queue_head runq;
+  // Wakeup queue. Separate spinlock -- acquired under port locks on recv
+  // wakeup.
+  queue_head wakeupq;
+  pthread_spinlock_t wakeup_lock;
   // How many threads and DPCs exist in total?
   int schob_count;
   // How many host-threads exist? Protected by runq_mutex.
@@ -208,6 +216,6 @@ void nk_host_shutdown(nk_host *host);
 void *nk_arch_create_ctx(void *stacktop,
                          void (*entry)(void *data1, void *data2, void *data3),
                          void *data1, void *data2, void *data3);
-void nk_arch_switch_ctx(void **fromstack, void *tostack);
+int nk_arch_switch_ctx(void **fromstack, void *tostack, int msg);
 
 #endif // __NK_THD_H__

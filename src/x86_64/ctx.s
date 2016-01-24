@@ -32,6 +32,10 @@ trampoline:
 nk_arch_create_ctx:
     # Align stack to 16-byte boundary.
     andq $-15, %rdi
+    # push a fake return address, and a null word to align stack.
+    subq $16, %rdi
+    movq $0, 8(%rdi)
+    movq $0, 0(%rdi)
     # Push context frame: rip, rbp, r15, r14, r13, r12, rbx.
     subq $56, %rdi
     movq $trampoline, 48(%rdi)  # rip
@@ -44,7 +48,7 @@ nk_arch_create_ctx:
     movq %rdi, %rax
     retq
 
-# args: void **fromstack (rdi), void *tostack (rsi)
+# args: void **fromstack (rdi), void *tostack (rsi), int msg (rdx)
 .global nk_arch_switch_ctx
 nk_arch_switch_ctx:
     pushq %rbp
@@ -61,4 +65,5 @@ nk_arch_switch_ctx:
     popq %r14
     popq %r15
     popq %rbp
+    movq %rdx, %rax
     retq

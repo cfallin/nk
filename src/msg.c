@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <pthread.h>
+#include <stdio.h>
 
 nk_status nk_msg_create(nk_msg **ret) {
   nk_status status;
@@ -64,6 +65,9 @@ void nk_port_set_dpc(nk_port *port, nk_dpc_func func, void *data) {
 }
 
 nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
+  nk_hostthd *hostthd = nk_hostthd_self();
+  assert(hostthd != NULL);
+  nk_host *host = hostthd->host;
   nk_msg *msg;
   nk_status status = nk_msg_create(&msg);
   if (status != NK_OK) {
@@ -89,11 +93,11 @@ nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
       // There's at least one thread waiting to receive: deliver right away.
       nk_thd *t = (nk_thd *)nk_schob_runq_shift(&port->thds);
       pthread_spin_unlock(&port->lock);
-      nk_hostthd *hostthd = nk_hostthd_self();
-      assert(hostthd != NULL);
       t->recvslot = msg;
       t->schob.state = NK_SCHOB_STATE_READY;
-      nk_schob_enqueue(hostthd->host, (nk_schob *)t, /* new_schob = */ 0);
+      printf("msg_send: sending msg %p to thread %p (old state %d)\n", msg, t,
+             t->schob.state);
+      nk_schob_enqueue(host, (nk_schob *)t, /* new_schob = */ 0);
       return NK_OK;
     } else {
       // No threads are waiting to receive: enqueue the message.
@@ -117,10 +121,11 @@ nk_status nk_msg_recv(nk_port *port, nk_msg **ret) {
     *ret = m;
     return NK_OK;
   } else {
-    self->schob.state = NK_SCHOB_STATE_WAITING;
     nk_schob_runq_push(&port->thds, (nk_schob *)self);
     pthread_spin_unlock(&port->lock);
-    nk_thd_yield();
+    printf("msg_recv: thd %p going to sleep\n", self);
+    nk_thd_yield_ext(NK_SCHOB_STATE_WAITING);
+    printf("msg_recv: thd %p woke up\n", self);
     assert(self->recvslot);
     *ret = self->recvslot;
     self->recvslot = NULL;
