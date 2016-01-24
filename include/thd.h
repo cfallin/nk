@@ -196,6 +196,9 @@ struct nk_host {
   nk_freelist hostthd_freelist;
   nk_freelist msg_freelist;
   nk_freelist port_freelist;
+  nk_freelist mutex_freelist;
+  nk_freelist cond_freelist;
+  nk_freelist barrier_freelist;
 };
 
 /**

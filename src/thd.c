@@ -1,5 +1,6 @@
 #include "thd.h"
 #include "msg.h"
+#include "sync.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -438,10 +439,15 @@ nk_status nk_host_create(nk_host **ret) {
   if (nk_msg_init_freelists(h) != NK_OK) {
     goto err6;
   }
+  if (nk_sync_init_freelists(h) != NK_OK) {
+      goto err7;
+  }
 
   *ret = NK_AUTOPTR_STEAL(nk_host, h);
   return NK_OK;
 
+err7:
+  nk_msg_destroy_freelists(h);
 err6:
   nk_freelist_destroy(&h->hostthd_freelist);
 err5:
@@ -518,5 +524,6 @@ void nk_host_destroy(nk_host *host) {
   nk_freelist_destroy(&host->dpc_freelist);
   nk_freelist_destroy(&host->hostthd_freelist);
   nk_msg_destroy_freelists(host);
+  nk_sync_destroy_freelists(host);
   NK_FREE(host);
 }
