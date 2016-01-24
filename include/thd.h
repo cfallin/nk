@@ -63,8 +63,8 @@ struct nk_thd_attrs {
   { NK_THD_STACKSIZE_DEFAULT, NK_PRIO_DEFAULT, 0 }
 
 #define NK_THD_STACKSIZE_MIN 4096
-#define NK_THD_STACKSIZE_DEFAULT 8192
-#define NK_THD_STACKSIZE_MAX (4 * 1024 * 1024)
+#define NK_THD_STACKSIZE_DEFAULT (2 * 1024 * 1024)
+#define NK_THD_STACKSIZE_MAX (16 * 1024 * 1024)
 
 struct nk_thd {
   nk_schob schob; // parent class
