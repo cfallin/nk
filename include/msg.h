@@ -4,6 +4,7 @@
 #include "kernel.h"
 #include "queue.h"
 #include "thd.h"
+#include "alloc.h"
 
 #include <pthread.h>
 
@@ -13,6 +14,7 @@ typedef enum {
 } nk_port_type;
 
 typedef struct nk_port {
+  nk_host *host;
   pthread_spinlock_t lock;
   queue_head msgs; // message(s) waiting to be received.
   queue_head thds; // thread(s) waiting to receive.
@@ -22,6 +24,7 @@ typedef struct nk_port {
 } nk_port;
 
 typedef struct nk_msg {
+  nk_host *host;
   nk_port *src;
   nk_port *dest;
   queue_entry port; // entry in port list.
@@ -35,7 +38,7 @@ QUEUE_DEFINE(nk_msg, port);
 /**
  * Allocate a new message.
  */
-nk_status nk_msg_create(nk_msg **ret);
+nk_status nk_msg_create(nk_host *h, nk_msg **ret);
 
 /**
  * Free a message.
@@ -48,7 +51,7 @@ void nk_msg_destroy(nk_msg *msg);
  * message is received).
  */
 
-nk_status nk_port_create(nk_port **ret, nk_port_type type);
+nk_status nk_port_create(nk_host *h, nk_port **ret, nk_port_type type);
 
 /**
  * Destroy this port. Behavior is undefined if any receivers are blocked
@@ -75,5 +78,9 @@ nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2);
  * must call nk_msg_destroy() when done with it.
  */
 nk_status nk_msg_recv(nk_port *port, nk_msg **ret);
+
+// Internal only.
+nk_status nk_msg_init_freelists(nk_host *h);
+void nk_msg_destroy_freelists(nk_host *h);
 
 #endif // __NK_MSG_H__

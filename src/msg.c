@@ -4,30 +4,36 @@
 #include <pthread.h>
 #include <stdio.h>
 
-nk_status nk_msg_create(nk_msg **ret) {
+nk_status nk_msg_create(nk_host *h, nk_msg **ret) {
   nk_status status;
 
   status = NK_ERR_NOMEM;
-  NK_AUTOPTR(nk_msg) m = NK_ALLOC(nk_msg);
+  nk_msg *m = nk_freelist_alloc(&h->msg_freelist);
   if (!m) {
     goto err;
   }
 
   QUEUE_INIT(&m->port);
+  m->host = h;
 
-  *ret = NK_AUTOPTR_STEAL(nk_msg, m);
+  *ret = m;
   return NK_OK;
 err:
+  if (m) {
+    nk_freelist_free(&h->msg_freelist, m);
+  }
   return status;
 }
 
-void nk_msg_destroy(nk_msg *msg) { NK_FREE(msg); }
+void nk_msg_destroy(nk_msg *msg) {
+  nk_freelist_free(&msg->host->msg_freelist, msg);
+}
 
-nk_status nk_port_create(nk_port **ret, nk_port_type type) {
+nk_status nk_port_create(nk_host *h, nk_port **ret, nk_port_type type) {
   nk_status status;
 
   status = NK_ERR_NOMEM;
-  NK_AUTOPTR(nk_port) p = NK_ALLOC(nk_port);
+  nk_port *p = nk_freelist_alloc(&h->port_freelist);
   if (!p) {
     goto err;
   }
@@ -41,10 +47,12 @@ nk_status nk_port_create(nk_port **ret, nk_port_type type) {
   QUEUE_INIT(&p->thds);
 
   p->type = type;
+  p->host = h;
 
-  *ret = NK_AUTOPTR_STEAL(nk_port, p);
+  *ret = p;
   return NK_OK;
 err:
+  nk_freelist_free(&h->port_freelist, p);
   return status;
 }
 
@@ -55,7 +63,7 @@ void nk_port_destroy(nk_port *port) {
   assert(nk_msg_port_empty(&port->msgs));
   assert(nk_schob_runq_empty(&port->thds));
   pthread_spin_destroy(&port->lock);
-  NK_FREE(port);
+  nk_freelist_free(&port->host->port_freelist, port);
 }
 
 void nk_port_set_dpc(nk_port *port, nk_dpc_func func, void *data) {
@@ -69,7 +77,7 @@ nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
   assert(hostthd != NULL);
   nk_host *host = hostthd->host;
   nk_msg *msg;
-  nk_status status = nk_msg_create(&msg);
+  nk_status status = nk_msg_create(port->host, &msg);
   if (status != NK_OK) {
     return status;
   }
@@ -95,7 +103,8 @@ nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
       pthread_spin_unlock(&port->lock);
       t->recvslot = msg;
       t->schob.state = NK_SCHOB_STATE_READY;
-      //printf("msg_send: sending msg %p to thread %p (old state %d)\n", msg, t,
+      // printf("msg_send: sending msg %p to thread %p (old state %d)\n", msg,
+      // t,
       //       t->schob.state);
       nk_schob_enqueue(host, (nk_schob *)t, /* new_schob = */ 0);
       return NK_OK;
@@ -123,12 +132,34 @@ nk_status nk_msg_recv(nk_port *port, nk_msg **ret) {
   } else {
     nk_schob_runq_push(&port->thds, (nk_schob *)self);
     pthread_spin_unlock(&port->lock);
-    //printf("msg_recv: thd %p going to sleep\n", self);
+    // printf("msg_recv: thd %p going to sleep\n", self);
     nk_thd_yield_ext(NK_THD_YIELD_REASON_WAITING);
-    //printf("msg_recv: thd %p woke up\n", self);
+    // printf("msg_recv: thd %p woke up\n", self);
     assert(self->recvslot);
     *ret = self->recvslot;
     self->recvslot = NULL;
     return NK_OK;
   }
+}
+
+DEFINE_SIMPLE_FREELIST_TYPE(nk_msg, 10000);
+DEFINE_SIMPLE_FREELIST_TYPE(nk_port, 10000);
+
+nk_status nk_msg_init_freelists(nk_host *h) {
+  nk_status status;
+  if ((status = nk_freelist_init(&h->msg_freelist, &nk_msg_freelist_attrs,
+                                 NULL)) != NK_OK) {
+    return status;
+  }
+  if ((status = nk_freelist_init(&h->port_freelist, &nk_port_freelist_attrs,
+                                 NULL)) != NK_OK) {
+    nk_freelist_destroy(&h->msg_freelist);
+    return status;
+  }
+  return NK_OK;
+}
+
+void nk_msg_destroy_freelists(nk_host* h) {
+    nk_freelist_destroy(&h->msg_freelist);
+    nk_freelist_destroy(&h->port_freelist);
 }

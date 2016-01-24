@@ -38,8 +38,8 @@ NK_TEST(msg_cross_messages) {
   arg1.value = 84;
   arg2.value = 42;
 
-  NK_TEST_ASSERT(nk_port_create(&arg1.this_port, NK_PORT_THD) == NK_OK);
-  NK_TEST_ASSERT(nk_port_create(&arg2.this_port, NK_PORT_THD) == NK_OK);
+  NK_TEST_ASSERT(nk_port_create(h, &arg1.this_port, NK_PORT_THD) == NK_OK);
+  NK_TEST_ASSERT(nk_port_create(h, &arg2.this_port, NK_PORT_THD) == NK_OK);
   arg1.other_port = arg2.this_port;
   arg2.other_port = arg1.this_port;
 
@@ -106,7 +106,7 @@ NK_TEST(msg_ring) {
   for (int i = 0; i < kRingSize; i++) {
     NK_TEST_ASSERT(
         nk_thd_create_ext(h, &thds[i], msg_ring_thd, &args[i], NULL) == NK_OK);
-    NK_TEST_ASSERT(nk_port_create(&ports[i], NK_PORT_THD) == NK_OK);
+    NK_TEST_ASSERT(nk_port_create(h, &ports[i], NK_PORT_THD) == NK_OK);
   }
   for (int i = 0; i < kRingSize; i++) {
     int next_i = (i + 1) % kRingSize;

@@ -1,4 +1,5 @@
 #include "thd.h"
+#include "msg.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -396,18 +397,9 @@ static void nk_hostthd_join(nk_hostthd *thd) {
   nk_freelist_free(&host->hostthd_freelist, thd);
 }
 
-#define DEFINE_FREELIST(type, count)                                           \
-  static nk_freelist_attrs type##_freelist_attrs = {                           \
-      .node_size = sizeof(type),                                               \
-      .max_count = count,                                                      \
-      .alloc_func = NULL,                                                      \
-      .free_func = NULL,                                                       \
-      .zero_func = NULL,                                                       \
-  }
-
-DEFINE_FREELIST(nk_thd, 10000);
-DEFINE_FREELIST(nk_dpc, 10000);
-DEFINE_FREELIST(nk_hostthd, 10000);
+DEFINE_SIMPLE_FREELIST_TYPE(nk_thd, 10000);
+DEFINE_SIMPLE_FREELIST_TYPE(nk_dpc, 10000);
+DEFINE_SIMPLE_FREELIST_TYPE(nk_hostthd, 10000);
 
 nk_status nk_host_create(nk_host **ret) {
   nk_status status;
@@ -442,6 +434,9 @@ nk_status nk_host_create(nk_host **ret) {
   if (nk_freelist_init(&h->hostthd_freelist, &nk_hostthd_freelist_attrs,
                        NULL) != NK_OK) {
     goto err5;
+  }
+  if (nk_msg_init_freelists(h) != NK_OK) {
+    goto err6;
   }
 
   *ret = NK_AUTOPTR_STEAL(nk_host, h);
@@ -522,5 +517,6 @@ void nk_host_destroy(nk_host *host) {
   nk_freelist_destroy(&host->thd_freelist);
   nk_freelist_destroy(&host->dpc_freelist);
   nk_freelist_destroy(&host->hostthd_freelist);
+  nk_msg_destroy_freelists(host);
   NK_FREE(host);
 }

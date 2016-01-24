@@ -30,16 +30,26 @@ struct nk_freelist_attrs {
 
 struct nk_freelist {
   nk_freelist_attrs attrs;
-  void* cookie;
+  void *cookie;
 
   pthread_spinlock_t lock;
   size_t count;
   nk_freelist_node *freelist_head;
 };
 
-nk_status nk_freelist_init(nk_freelist *f, const nk_freelist_attrs *attrs, void* cookie);
+nk_status nk_freelist_init(nk_freelist *f, const nk_freelist_attrs *attrs,
+                           void *cookie);
 void nk_freelist_destroy(nk_freelist *f);
 void *nk_freelist_alloc(nk_freelist *f);
 void nk_freelist_free(nk_freelist *f, void *p);
+
+#define DEFINE_SIMPLE_FREELIST_TYPE(type, count)                               \
+  static nk_freelist_attrs type##_freelist_attrs = {                           \
+      .node_size = sizeof(type),                                               \
+      .max_count = count,                                                      \
+      .alloc_func = NULL,                                                      \
+      .free_func = NULL,                                                       \
+      .zero_func = NULL,                                                       \
+  }
 
 #endif // __NK_ALLOC_H__
