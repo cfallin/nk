@@ -74,7 +74,7 @@ static void msg_ring_thd(nk_thd *self, void *_arg) {
       return;
     }
     if (arg->is_last && i == (kIters - 1)) {
-      return;
+      break;
     }
     if (nk_msg_send(arg->next_port, arg->this_port, m->data1, m->data2) !=
         NK_OK) {
@@ -110,14 +110,14 @@ NK_TEST(msg_ring) {
     args[i].this_port = ports[i];
     args[i].next_port = ports[next_i];
     args[i].done_flag = 0;
-    args[i].is_last = (i != (kRingSize - 1));
+    args[i].is_last = (i == (kRingSize - 1));
   }
 
   nk_dpc *startdpc;
   NK_TEST_ASSERT(nk_dpc_create_ext(h, &startdpc, msg_ring_start_dpc, ports[0],
                                    NULL) == NK_OK);
 
-  nk_host_run(h, 16, NULL, NULL);
+  nk_host_run(h, 1, NULL, NULL);
 
   for (int i = 0; i < kRingSize; i++) {
     NK_TEST_ASSERT(args[i].done_flag == 1);
