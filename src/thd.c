@@ -139,7 +139,7 @@ nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
   nk_status status;
 
   status = NK_ERR_NOMEM;
-  NK_AUTOPTR(nk_thd) t = NK_ALLOC(nk_thd);
+  nk_thd *t = nk_freelist_alloc(&host->thd_freelist);
   if (!t) {
     goto err;
   }
@@ -162,17 +162,23 @@ nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
 
   nk_schob_enqueue(host, (nk_schob *)t, /* new_schob = */ 1);
 
-  *ret = NK_AUTOPTR_STEAL(nk_thd, t);
+  *ret = t;
   return NK_OK;
 
 err:
+  if (t) {
+    nk_freelist_free(&host->thd_freelist, t);
+  }
   return status;
 }
 
 static void nk_thd_destroy(nk_thd *t) {
+  nk_hostthd *hostthd = nk_hostthd_self();
+  assert(hostthd != NULL);
+  nk_host *host = hostthd->host;
   freestack(t->stacklen, t->stack);
   nk_schob_destroy(&t->schob);
-  NK_FREE(t);
+  nk_freelist_free(&host->thd_freelist, t);
 }
 
 void nk_thd_yield_ext(nk_thd_yield_reason r) {
@@ -218,7 +224,7 @@ nk_status nk_dpc_create_ext(nk_host *host, nk_dpc **ret, nk_dpc_func func,
   nk_status status;
 
   status = NK_ERR_NOMEM;
-  NK_AUTOPTR(nk_dpc) d = NK_ALLOC(nk_dpc);
+  nk_dpc *d = nk_freelist_alloc(&host->dpc_freelist);
   if (!d) {
     goto err;
   }
@@ -234,16 +240,22 @@ nk_status nk_dpc_create_ext(nk_host *host, nk_dpc **ret, nk_dpc_func func,
 
   nk_schob_enqueue(host, (nk_schob *)d, /* new_schob = */ 1);
 
-  *ret = NK_AUTOPTR_STEAL(nk_dpc, d);
+  *ret = d;
   return NK_OK;
 
 err:
+  if (d) {
+    nk_freelist_free(&host->dpc_freelist, d);
+  }
   return status;
 }
 
 static void nk_dpc_destroy(nk_dpc *dpc) {
+  nk_hostthd *hostthd = nk_hostthd_self();
+  assert(hostthd != NULL);
+  nk_host *host = hostthd->host;
   nk_schob_destroy(&dpc->schob);
-  NK_FREE(dpc);
+  nk_freelist_free(&host->dpc_freelist, dpc);
 }
 
 // --------------- hostthd ---------------
@@ -347,7 +359,7 @@ static nk_status nk_hostthd_create(nk_hostthd **ret, nk_host *host) {
   nk_status status;
 
   status = NK_ERR_NOMEM;
-  NK_AUTOPTR(nk_hostthd) h = NK_ALLOC(nk_hostthd);
+  nk_hostthd *h = nk_freelist_alloc(&host->hostthd_freelist);
   if (!h) {
     goto err;
   }
@@ -363,22 +375,39 @@ static nk_status nk_hostthd_create(nk_hostthd **ret, nk_host *host) {
   host->hostthd_count++;
   pthread_mutex_unlock(&host->runq_mutex);
 
-  *ret = NK_AUTOPTR_STEAL(nk_hostthd, h);
+  *ret = h;
   return NK_OK;
 
 err:
+  if (h) {
+    nk_freelist_free(&host->hostthd_freelist, h);
+  }
   return status;
 }
 
 static void nk_hostthd_join(nk_hostthd *thd) {
   void *retval;
+  nk_host *host = thd->host;
   pthread_join(thd->pthread, &retval);
   pthread_mutex_lock(&thd->host->runq_mutex);
   nk_hostthd_list_remove(thd);
   thd->host->hostthd_count--;
   pthread_mutex_unlock(&thd->host->runq_mutex);
-  NK_FREE(thd);
+  nk_freelist_free(&host->hostthd_freelist, thd);
 }
+
+#define DEFINE_FREELIST(type, count)                                           \
+  static nk_freelist_attrs type##_freelist_attrs = {                           \
+      .node_size = sizeof(type),                                               \
+      .max_count = count,                                                      \
+      .alloc_func = NULL,                                                      \
+      .free_func = NULL,                                                       \
+      .zero_func = NULL,                                                       \
+  }
+
+DEFINE_FREELIST(nk_thd, 10000);
+DEFINE_FREELIST(nk_dpc, 10000);
+DEFINE_FREELIST(nk_hostthd, 10000);
 
 nk_status nk_host_create(nk_host **ret) {
   nk_status status;
@@ -402,9 +431,30 @@ nk_status nk_host_create(nk_host **ret) {
   QUEUE_INIT(&h->runq);
   QUEUE_INIT(&h->hostthds);
 
+  if (nk_freelist_init(&h->thd_freelist, &nk_thd_freelist_attrs, NULL) !=
+      NK_OK) {
+    goto err3;
+  }
+  if (nk_freelist_init(&h->dpc_freelist, &nk_dpc_freelist_attrs, NULL) !=
+      NK_OK) {
+    goto err4;
+  }
+  if (nk_freelist_init(&h->hostthd_freelist, &nk_hostthd_freelist_attrs,
+                       NULL) != NK_OK) {
+    goto err5;
+  }
+
   *ret = NK_AUTOPTR_STEAL(nk_host, h);
   return NK_OK;
 
+err6:
+  nk_freelist_destroy(&h->hostthd_freelist);
+err5:
+  nk_freelist_destroy(&h->dpc_freelist);
+err4:
+  nk_freelist_destroy(&h->thd_freelist);
+err3:
+  pthread_cond_destroy(&h->runq_cond);
 err2:
   pthread_mutex_destroy(&h->runq_mutex);
 err:
@@ -469,5 +519,8 @@ void nk_host_destroy(nk_host *host) {
   assert(host->schob_count == 0);
   pthread_cond_destroy(&host->runq_cond);
   pthread_mutex_destroy(&host->runq_mutex);
+  nk_freelist_destroy(&host->thd_freelist);
+  nk_freelist_destroy(&host->dpc_freelist);
+  nk_freelist_destroy(&host->hostthd_freelist);
   NK_FREE(host);
 }

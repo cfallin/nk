@@ -1,4 +1,4 @@
-set(SRCS src/kernel.c src/thd.c src/msg.c src/databuf.c src/x86_64/ctx.s)
+set(SRCS src/kernel.c src/thd.c src/msg.c src/databuf.c src/alloc.c src/x86_64/ctx.s)
 set(TEST_SRCS test/test_main.c test/test.c test/test_databuf.c test/test_thd.c
     test/test_msg.c)
 include_directories(include/)

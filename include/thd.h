@@ -4,6 +4,7 @@
 #include "kernel.h"
 #include "queue.h"
 #include "databuf.h"
+#include "alloc.h"
 
 // typedefs.
 typedef struct nk_schob nk_schob;
@@ -189,6 +190,10 @@ struct nk_host {
   queue_head hostthds;
   // Shutdown flag. Protected under, and signaled by, runq_lock / runq_cond.
   int shutdown;
+  // Freelists.
+  nk_freelist thd_freelist;
+  nk_freelist dpc_freelist;
+  nk_freelist hostthd_freelist;
 };
 
 /**
