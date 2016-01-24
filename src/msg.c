@@ -20,13 +20,7 @@ err:
   return status;
 }
 
-void nk_msg_destroy(nk_msg *msg) {
-  if (!msg) {
-    return;
-  }
-  assert(nk_msg_port_empty(&msg->port));
-  NK_FREE(msg);
-}
+void nk_msg_destroy(nk_msg *msg) { NK_FREE(msg); }
 
 nk_status nk_port_create(nk_port **ret, nk_port_type type) {
   nk_status status;
@@ -69,7 +63,18 @@ void nk_port_set_dpc(nk_port *port, nk_dpc_func func, void *data) {
   port->dpc_data = data;
 }
 
-nk_status nk_msg_send(nk_port *port, nk_msg *msg) {
+nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
+  nk_msg *msg;
+  nk_status status = nk_msg_create(&msg);
+  if (status != NK_OK) {
+    return status;
+  }
+
+  msg->data1 = data1;
+  msg->data2 = data2;
+  msg->src = from;
+  msg->dest = port;
+
   if (port->type == NK_PORT_DPC) {
     if (port->dpc_func) {
       nk_dpc *new_dpc;

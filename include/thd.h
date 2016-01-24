@@ -83,6 +83,14 @@ typedef void (*nk_thd_entrypoint)(nk_thd *self, void *data);
 nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
                         const nk_thd_attrs *attrs);
 /**
+ * Operates like nk_thd_create(), but allows insertion of a thread into an
+ * nk_host instance from outside that instance.
+ */
+nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
+                            nk_thd_entrypoint entry, void *data,
+                            const nk_thd_attrs *attrs);
+
+/**
  * Yields to the scheduler. Control may return at any time.
  */
 void nk_thd_yield();
@@ -119,6 +127,13 @@ struct nk_dpc {
  */
 nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data,
                         const nk_dpc_attrs *attrs);
+/**
+ * Operates like nk_dpc_create(), but allows insertion of a DPC into a host
+ * from outside that host's context.
+ */
+nk_status nk_dpc_create_ext(nk_host *h, nk_dpc **ret, nk_dpc_func func,
+                            void *data, const nk_dpc_attrs *attrs);
+
 /**
  * Returns the current DPC context, if any, or NULL if in thread or other
  * context.

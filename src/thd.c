@@ -130,6 +130,12 @@ nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
                         const nk_thd_attrs *attrs) {
   nk_hostthd *host = nk_hostthd_self();
   assert(host != NULL);
+  return nk_thd_create_ext(host->host, ret, entry, data, attrs);
+}
+
+nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
+                            nk_thd_entrypoint entry, void *data,
+                            const nk_thd_attrs *attrs) {
   nk_status status;
 
   status = NK_ERR_NOMEM;
@@ -154,7 +160,7 @@ nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
   t->stacktop = nk_arch_create_ctx(t->stacktop, nk_thd_entry, /* data1 = */ t,
                                    /* data2 = */ entry, /* data3 = */ data);
 
-  nk_schob_enqueue(host->host, (nk_schob *)t, /* new_schob = */ 1);
+  nk_schob_enqueue(host, (nk_schob *)t, /* new_schob = */ 1);
 
   *ret = NK_AUTOPTR_STEAL(nk_thd, t);
   return NK_OK;
@@ -195,9 +201,16 @@ void nk_thd_exit() {
 }
 
 // ------------- dpc -----------
-static nk_status nk_dpc_create_(nk_hostthd *host, nk_dpc **ret,
-                                nk_dpc_func func, void *data,
-                                const nk_dpc_attrs *attrs) {
+
+nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data,
+                        const nk_dpc_attrs *attrs) {
+  nk_hostthd *host = nk_hostthd_self();
+  assert(host != NULL);
+  return nk_dpc_create_ext(host->host, ret, func, data, attrs);
+}
+
+nk_status nk_dpc_create_ext(nk_host *host, nk_dpc **ret, nk_dpc_func func,
+                            void *data, const nk_dpc_attrs *attrs) {
   nk_status status;
 
   status = NK_ERR_NOMEM;
@@ -215,20 +228,13 @@ static nk_status nk_dpc_create_(nk_hostthd *host, nk_dpc **ret,
     goto err;
   }
 
-  nk_schob_enqueue(host->host, (nk_schob *)d, /* new_schob = */ 1);
+  nk_schob_enqueue(host, (nk_schob *)d, /* new_schob = */ 1);
 
   *ret = NK_AUTOPTR_STEAL(nk_dpc, d);
   return NK_OK;
 
 err:
   return status;
-}
-
-nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data,
-                        const nk_dpc_attrs *attrs) {
-  nk_hostthd *host = nk_hostthd_self();
-  assert(host != NULL);
-  return nk_dpc_create_(host, ret, func, data, attrs);
 }
 
 static void nk_dpc_destroy(nk_dpc *dpc) {
@@ -298,7 +304,7 @@ static void *nk_hostthd_main(void *_self) {
       pthread_mutex_lock(&host->runq_mutex);
       host->schob_count--;
       if (host->schob_count == 0) {
-          pthread_cond_broadcast(&host->runq_cond);
+        pthread_cond_broadcast(&host->runq_cond);
       }
       pthread_mutex_unlock(&host->runq_mutex);
     }
@@ -391,9 +397,9 @@ void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
       nk_host_shutdown(host);
       break;
     }
-    if (i == 0) {
+    if (i == 0 && main != NULL) {
       nk_dpc *main_dpc;
-      status = nk_dpc_create_(hostthd, &main_dpc, main, data, NULL);
+      status = nk_dpc_create_ext(host, &main_dpc, main, data, NULL);
       if (status != NK_OK) {
         nk_host_shutdown(host);
         break;
