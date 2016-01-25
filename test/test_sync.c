@@ -96,6 +96,7 @@ static struct sync_cond_channel *sync_cond_channel_new(nk_host *h) {
   nk_cond_create(h, &c->c);
   c->count = 0;
   c->quit_token = 0;
+  return c;
 }
 
 static void sync_cond_channel_destroy(struct sync_cond_channel *c) {
