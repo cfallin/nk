@@ -6,12 +6,16 @@
 #include <pthread.h>
 #include <sys/mman.h>
 
-// This is the only (thread-local) global state. Everything else is accessed
-// via the host (global nk instance) or host-thread struct.
+// Global: thread-stack freelist and associated lock.
+static pthread_mutex_t nk_thd_stack_freelist_mutex = PTHREAD_MUTEX_INITIALIZER;
+static nk_freelist nk_thd_stack_freelist;
+static pthread_once_t nk_thd_stack_freelist_once = PTHREAD_ONCE_INIT;
+
+// Global: pthreads TLS key for the "current host thread" pointer.
 static pthread_key_t nk_hostthd_self_key;
 static pthread_once_t nk_hostthd_self_key_once = PTHREAD_ONCE_INIT;
 
-void setup_hostthd_self_key() {
+static void setup_hostthd_self_key() {
   pthread_key_create(&nk_hostthd_self_key, NULL);
 }
 
@@ -44,11 +48,9 @@ nk_dpc *nk_dpc_self() {
 
 // ------ schob ------
 
-static nk_status nk_schob_init(nk_schob *schob, nk_schob_type type,
-                               uint32_t prio) {
+static nk_status nk_schob_init(nk_schob *schob, nk_schob_type type) {
   // All fields zeroed on entry.
   schob->type = type;
-  schob->prio = prio;
   return NK_OK;
 }
 
@@ -79,37 +81,45 @@ void nk_schob_enqueue(nk_host *host, nk_schob *schob, int new_schob) {
 
 // ------ thd ------
 
-static nk_status allocstack(size_t size, void **stack, void **top,
-                            size_t *alloced) {
-  // Round up to next page size.
-  size = (size + 4095) & ~4095UL;
-  // Add one more page as a guard page.
-  size += 4096;
+#define NK_THD_STACKSIZE (256 * 1024)
+#define NK_THD_GUARDSIZE 4096
 
-  void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
+static void *allocstack(const nk_freelist_attrs *attrs, void *cookie) {
+  void *p = mmap(NULL, NK_THD_STACKSIZE, PROT_READ | PROT_WRITE,
                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
   if (!p) {
-    return NK_ERR_NOMEM;
+    return NULL;
   }
 
   // protect the guard page.
-  if (mprotect(p, 4096, PROT_NONE)) {
-    munmap(p, size);
-    return NK_ERR_NOMEM;
+  if (mprotect(p, NK_THD_GUARDSIZE, PROT_NONE)) {
+    munmap(p, NK_THD_STACKSIZE);
+    return NULL;
   }
 
-  *stack = p;
-  *top = ((uint8_t *)p) + size;
-  *alloced = size;
-  return NK_OK;
+  return p;
 }
 
-static nk_status freestack(size_t size, void *stack) {
-  if (munmap(stack, size)) {
-    return NK_ERR_PARAM;
-  } else {
-    return NK_OK;
-  }
+static void freestack(const nk_freelist_attrs *attrs, void *cookie, void *p) {
+  munmap(p, NK_THD_STACKSIZE);
+}
+
+static void zerostack(const nk_freelist_attrs *attrs, void *cookie, void *p) {
+  // Nothing.
+}
+
+static nk_freelist_attrs nk_thd_stack_freelist_attrs = {
+    .node_size = 0, // unused, since we use custom alloc/free/zero funcs
+    .max_count = 1000,
+    // `next`-ptr header after guard page
+    .freelist_header_offset = NK_THD_GUARDSIZE,
+    .alloc_func = allocstack,
+    .free_func = freestack,
+    .zero_func = zerostack,
+};
+
+static void setup_nk_thd_stack_freelist() {
+  nk_freelist_init(&nk_thd_stack_freelist, &nk_thd_stack_freelist_attrs, NULL);
 }
 
 static __attribute__((noreturn)) void nk_thd_entry(void *data1, void *data2,
@@ -122,16 +132,14 @@ static __attribute__((noreturn)) void nk_thd_entry(void *data1, void *data2,
   nk_thd_exit();
 }
 
-nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
-                        const nk_thd_attrs *attrs) {
+nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data) {
   nk_hostthd *host = nk_hostthd_self();
   assert(host != NULL);
-  return nk_thd_create_ext(host->host, ret, entry, data, attrs);
+  return nk_thd_create_ext(host->host, ret, entry, data);
 }
 
 nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
-                            nk_thd_entrypoint entry, void *data,
-                            const nk_thd_attrs *attrs) {
+                            nk_thd_entrypoint entry, void *data) {
   nk_status status;
 
   status = NK_ERR_NOMEM;
@@ -145,16 +153,18 @@ nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
   }
 
   status = NK_ERR_NOMEM;
-  size_t stacksize = attrs ? attrs->stacksize : NK_THD_STACKSIZE_DEFAULT;
-  status = allocstack(stacksize, &t->stack, &t->stacktop, &t->stacklen);
-  if (status != NK_OK) {
-    goto err;
+  pthread_mutex_lock(&nk_thd_stack_freelist_mutex);
+  pthread_once(&nk_thd_stack_freelist_once, &setup_nk_thd_stack_freelist);
+  t->stack = nk_freelist_alloc(&nk_thd_stack_freelist);
+  pthread_mutex_unlock(&nk_thd_stack_freelist_mutex);
+  t->stacktop = (char *)t->stack + NK_THD_STACKSIZE;
+  if (!t->stack) {
+    goto err2;
   }
 
-  status = nk_schob_init(&t->schob, NK_SCHOB_TYPE_THD,
-                         attrs ? attrs->prio : NK_PRIO_DEFAULT);
+  status = nk_schob_init(&t->schob, NK_SCHOB_TYPE_THD);
   if (status != NK_OK) {
-    goto err;
+    goto err3;
   }
 
   t->stacktop = nk_arch_create_ctx(t->stacktop, nk_thd_entry, /* data1 = */ t,
@@ -165,6 +175,12 @@ nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
   *ret = t;
   return NK_OK;
 
+err3:
+  pthread_mutex_lock(&nk_thd_stack_freelist_mutex);
+  nk_freelist_free(&nk_thd_stack_freelist, t->stack);
+  pthread_mutex_unlock(&nk_thd_stack_freelist_mutex);
+err2:
+  pthread_spin_destroy(&t->running_lock);
 err:
   if (t) {
     nk_freelist_free(&host->thd_freelist, t);
@@ -176,7 +192,11 @@ static void nk_thd_destroy(nk_thd *t) {
   nk_hostthd *hostthd = nk_hostthd_self();
   assert(hostthd != NULL);
   nk_host *host = hostthd->host;
-  freestack(t->stacklen, t->stack);
+
+  pthread_mutex_lock(&nk_thd_stack_freelist_mutex);
+  nk_freelist_free(&nk_thd_stack_freelist, t->stack);
+  pthread_mutex_unlock(&nk_thd_stack_freelist_mutex);
+
   pthread_spin_destroy(&t->running_lock);
   nk_schob_destroy(&t->schob);
   nk_freelist_free(&host->thd_freelist, t);
@@ -208,15 +228,14 @@ void nk_thd_exit() {
 
 // ------------- dpc -----------
 
-nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data,
-                        const nk_dpc_attrs *attrs) {
+nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data) {
   nk_hostthd *host = nk_hostthd_self();
   assert(host != NULL);
-  return nk_dpc_create_ext(host->host, ret, func, data, attrs);
+  return nk_dpc_create_ext(host->host, ret, func, data);
 }
 
 nk_status nk_dpc_create_ext(nk_host *host, nk_dpc **ret, nk_dpc_func func,
-                            void *data, const nk_dpc_attrs *attrs) {
+                            void *data) {
   nk_status status;
 
   status = NK_ERR_NOMEM;
@@ -228,8 +247,7 @@ nk_status nk_dpc_create_ext(nk_host *host, nk_dpc **ret, nk_dpc_func func,
   d->func = func;
   d->data = data;
 
-  status = nk_schob_init(&d->schob, NK_SCHOB_TYPE_DPC,
-                         attrs ? attrs->prio : NK_PRIO_DEFAULT);
+  status = nk_schob_init(&d->schob, NK_SCHOB_TYPE_DPC);
   if (status != NK_OK) {
     goto err;
   }
@@ -448,7 +466,7 @@ err:
   return status;
 }
 
-void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
+void nk_host_run(nk_host *host, int workers) {
   // Create workers. Create one more 'hidden' worker to run the main DPC.
   for (int i = 0; i < workers + 1; i++) {
     nk_hostthd *hostthd;
@@ -456,14 +474,6 @@ void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data) {
     if (status != NK_OK) {
       nk_host_shutdown(host);
       break;
-    }
-    if (i == 0 && main != NULL) {
-      nk_dpc *main_dpc;
-      status = nk_dpc_create_ext(host, &main_dpc, main, data, NULL);
-      if (status != NK_OK) {
-        nk_host_shutdown(host);
-        break;
-      }
     }
   }
 

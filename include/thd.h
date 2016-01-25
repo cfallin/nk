@@ -8,9 +8,7 @@
 
 // typedefs.
 typedef struct nk_schob nk_schob;
-typedef struct nk_thd_attrs nk_thd_attrs;
 typedef struct nk_thd nk_thd;
-typedef struct nk_dpc_attrs nk_dpc_attrs;
 typedef struct nk_dpc nk_dpc;
 typedef struct nk_host nk_host;
 typedef struct nk_hostthd nk_hostthd;
@@ -67,36 +65,14 @@ struct nk_schob {
   // on a global scheduler queue, host-thread queue, msg or sem queue, join
   // queue, or cleanup queue.
   queue_entry runq;
-
-  // running on a host thread?
-  nk_hostthd *hostthd;
-
-  uint32_t prio;
 };
 
 QUEUE_DEFINE(nk_schob, runq);
-
-#define NK_PRIO_MIN 0
-#define NK_PRIO_DEFAULT 0x80000000
-#define NK_PRIO_MAX 0xffffffff
 
 // Internal -- used by msg code.
 void nk_schob_enqueue(nk_host *host, nk_schob *schob, int new_schob);
 
 // ----------------- thds: conventional green threads. ------------
-
-struct nk_thd_attrs {
-  // Stack size.
-  uint32_t stacksize;
-  uint32_t prio;
-};
-
-#define NK_THD_ATTRS_INIT                                                      \
-  { NK_THD_STACKSIZE_DEFAULT, NK_PRIO_DEFAULT, 0 }
-
-#define NK_THD_STACKSIZE_MIN 4096
-#define NK_THD_STACKSIZE_DEFAULT (2 * 1024 * 1024)
-#define NK_THD_STACKSIZE_MAX (16 * 1024 * 1024)
 
 struct nk_thd {
   nk_schob schob; // parent class
@@ -109,25 +85,23 @@ struct nk_thd {
   pthread_spinlock_t running_lock;
   void *stack;
   void *stacktop;
-  size_t stacklen; // actual stacklen, as opposed to attrs-specified len.
-  void *recvslot;  // received msg when woken up from a port recv queue.
+  void *recvslot; // received msg when woken up from a port recv queue.
 };
 
 typedef void (*nk_thd_entrypoint)(nk_thd *self, void *data);
 
 /**
  * Creates a new thread. Must only be called from within a DPC or thread
- * context. `attrs` may be NULL.
+ * context.
  */
-nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data,
-                        const nk_thd_attrs *attrs);
+nk_status nk_thd_create(nk_thd **ret, nk_thd_entrypoint entry, void *data);
+
 /**
  * Operates like nk_thd_create(), but allows insertion of a thread into an
  * nk_host instance from outside that instance.
  */
 nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
-                            nk_thd_entrypoint entry, void *data,
-                            const nk_thd_attrs *attrs);
+                            nk_thd_entrypoint entry, void *data);
 
 /**
  * Yields to the scheduler. Control may return at any time.
@@ -155,13 +129,6 @@ nk_thd *nk_thd_self();
 
 // ------------- dpcs: deferred procedure calls. ----------------
 
-struct nk_dpc_attrs {
-  uint32_t prio;
-};
-
-#define NK_DPC_ATTRS_INIT                                                      \
-  { NK_PRIO_DEFAULT, 0 }
-
 typedef void (*nk_dpc_func)(void *data);
 
 struct nk_dpc {
@@ -175,14 +142,14 @@ struct nk_dpc {
  * later time, outside the context of the calling DPC/thread. This function must
  * be called in the context of another DPC or thread.
  */
-nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data,
-                        const nk_dpc_attrs *attrs);
+nk_status nk_dpc_create(nk_dpc **ret, nk_dpc_func func, void *data);
+
 /**
  * Operates like nk_dpc_create(), but allows insertion of a DPC into a host
  * from outside that host's context.
  */
 nk_status nk_dpc_create_ext(nk_host *h, nk_dpc **ret, nk_dpc_func func,
-                            void *data, const nk_dpc_attrs *attrs);
+                            void *data);
 
 /**
  * Returns the current DPC context, if any, or NULL if in thread or other
@@ -241,13 +208,11 @@ struct nk_host {
  */
 nk_status nk_host_create(nk_host **ret);
 /**
- * Runs the host instance, returning after the instance is shut down. The given
- * DPC function/arg is executed as a DPC within the host context, and is the
- * only point from which other threads/DPCs may be created. The host instance
- * will run as long as at least one thread or DPC exists, unless
+ * Runs the host instance, returning after the instance is shut down.  The host
+ * instance will run as long as at least one thread or DPC exists, unless
  * `nk_host_shutdown()` is called.
  */
-void nk_host_run(nk_host *host, int workers, nk_dpc_func main, void *data);
+void nk_host_run(nk_host *host, int workers);
 /**
  * Destroys the host instance. Must be called only after `nk_host_run()`
  * returns.

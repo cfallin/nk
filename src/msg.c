@@ -91,7 +91,7 @@ nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
     if (port->dpc_func) {
       nk_dpc *new_dpc;
       msg->dpc_data = port->dpc_data;
-      return nk_dpc_create(&new_dpc, port->dpc_func, msg, NULL);
+      return nk_dpc_create(&new_dpc, port->dpc_func, msg);
     } else {
       return NK_ERR_NORECV;
     }

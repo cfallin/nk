@@ -2,8 +2,6 @@ To-do list
 ----------
 
 Performance
-- Thread stack freelisting (avoid mmap()/mprotect()/munmap() calls throughout
-  thread lifetime)
 - Lock-free implementations where possible: run-queue, wait-queues,
   thread-state transitions
 - Distributed task queue with work-stealing
@@ -19,3 +17,4 @@ Feature list
   - anonymous thread/DPC-spawn with lambda arg
   - RAII mutexes
   - templated message-passing of POD classes
+- Scheduler priorities

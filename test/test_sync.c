@@ -27,9 +27,9 @@ NK_TEST(sync_mutex) {
   NK_TEST_ASSERT(nk_mutex_create(h, &arg.m) == NK_OK);
   for (int i = 0; i < 10; i++) {
     NK_TEST_ASSERT(
-        nk_thd_create_ext(h, &thds[i], &sync_mutex_thd, &arg, NULL) == NK_OK);
+        nk_thd_create_ext(h, &thds[i], &sync_mutex_thd, &arg) == NK_OK);
   }
-  nk_host_run(h, 10, NULL, NULL);
+  nk_host_run(h, 10);
 
   NK_TEST_ASSERT(arg.value == 10000);
   NK_TEST_OK();
@@ -140,10 +140,10 @@ NK_TEST(sync_cond) {
       arg[i].inbound = arg[i - 1].outbound;
     }
 
-    nk_thd_create_ext(h, &thds[i], &sync_cond_thd, &arg[i], NULL);
+    nk_thd_create_ext(h, &thds[i], &sync_cond_thd, &arg[i]);
   }
 
-  nk_host_run(h, 1, NULL, NULL);
+  nk_host_run(h, 1);
 
   NK_TEST_ASSERT(arg[kThdCount - 1].final_count == 1000);
 
@@ -209,11 +209,11 @@ NK_TEST(sync_barrier) {
   nk_barrier_create(h, &arg.b1, kThdCount + 1);
   nk_barrier_create(h, &arg.b2, kThdCount + 1);
   for (int i = 0; i < kThdCount; i++) {
-    nk_thd_create_ext(h, &thds[i], &sync_barrier_thd1, &arg, NULL);
+    nk_thd_create_ext(h, &thds[i], &sync_barrier_thd1, &arg);
   }
-  nk_thd_create_ext(h, &masterthd, &sync_barrier_thd2, &arg, NULL);
+  nk_thd_create_ext(h, &masterthd, &sync_barrier_thd2, &arg);
 
-  nk_host_run(h, 100, NULL, NULL);
+  nk_host_run(h, 100);
 
   NK_TEST_ASSERT(arg.ok_iters == kIterCount);
 

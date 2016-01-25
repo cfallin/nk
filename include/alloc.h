@@ -23,6 +23,9 @@ typedef void (*nk_freelist_zero_func)(const nk_freelist_attrs *attrs,
 struct nk_freelist_attrs {
   size_t node_size; // used only by default alloc/free/zero funcs.
   size_t max_count;
+  // allows freelist obj header to be offset to avoid e.g. guard pages at first
+  // page of thread stacks.
+  size_t freelist_header_offset;
   nk_freelist_alloc_func alloc_func;
   nk_freelist_free_func free_func;
   nk_freelist_zero_func zero_func;
@@ -47,6 +50,7 @@ void nk_freelist_free(nk_freelist *f, void *p);
   static nk_freelist_attrs type##_freelist_attrs = {                           \
       .node_size = sizeof(type),                                               \
       .max_count = count,                                                      \
+      .freelist_header_offset = 0,                                             \
       .alloc_func = NULL,                                                      \
       .free_func = NULL,                                                       \
       .zero_func = NULL,                                                       \

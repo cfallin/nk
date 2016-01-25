@@ -43,11 +43,11 @@ NK_TEST(msg_cross_messages) {
   arg1.other_port = arg2.this_port;
   arg2.other_port = arg1.this_port;
 
-  NK_TEST_ASSERT(nk_thd_create_ext(h, &thd1, msg_cross_messages_thd, &arg1,
-                                   NULL) == NK_OK);
-  NK_TEST_ASSERT(nk_thd_create_ext(h, &thd2, msg_cross_messages_thd, &arg2,
-                                   NULL) == NK_OK);
-  nk_host_run(h, 2, NULL, NULL);
+  NK_TEST_ASSERT(nk_thd_create_ext(h, &thd1, msg_cross_messages_thd, &arg1) ==
+                 NK_OK);
+  NK_TEST_ASSERT(nk_thd_create_ext(h, &thd2, msg_cross_messages_thd, &arg2) ==
+                 NK_OK);
+  nk_host_run(h, 2);
   nk_port_destroy(arg2.this_port);
   nk_port_destroy(arg1.this_port);
   nk_host_destroy(h);
@@ -104,8 +104,8 @@ NK_TEST(msg_ring) {
   struct msg_ring_arg args[kRingSize];
 
   for (int i = 0; i < kRingSize; i++) {
-    NK_TEST_ASSERT(
-        nk_thd_create_ext(h, &thds[i], msg_ring_thd, &args[i], NULL) == NK_OK);
+    NK_TEST_ASSERT(nk_thd_create_ext(h, &thds[i], msg_ring_thd, &args[i]) ==
+                   NK_OK);
     NK_TEST_ASSERT(nk_port_create(h, &ports[i], NK_PORT_THD) == NK_OK);
   }
   for (int i = 0; i < kRingSize; i++) {
@@ -117,10 +117,10 @@ NK_TEST(msg_ring) {
   }
 
   nk_dpc *startdpc;
-  NK_TEST_ASSERT(nk_dpc_create_ext(h, &startdpc, msg_ring_start_dpc, ports[0],
-                                   NULL) == NK_OK);
+  NK_TEST_ASSERT(
+      nk_dpc_create_ext(h, &startdpc, msg_ring_start_dpc, ports[0]) == NK_OK);
 
-  nk_host_run(h, 16, NULL, NULL);
+  nk_host_run(h, 16);
 
   for (int i = 0; i < kRingSize; i++) {
     NK_TEST_ASSERT(args[i].done_flag == 1);

@@ -18,6 +18,12 @@ static void nk_freelist_zero_default(const nk_freelist_attrs *attrs,
   memset(p, 0, attrs->node_size);
 }
 
+#define FREELIST_OBJ_FROM_NODE(f, node)                                        \
+  ((void *)((char *)(node) - (f)->attrs.freelist_header_offset))
+
+#define FREELIST_NODE_FROM_OBJ(f, obj)                                         \
+  ((void *)((char *)(obj) + (f)->attrs.freelist_header_offset))
+
 nk_status nk_freelist_init(nk_freelist *f, const nk_freelist_attrs *attrs,
                            void *cookie) {
   if (pthread_spin_init(&f->lock, PTHREAD_PROCESS_PRIVATE)) {
@@ -45,7 +51,7 @@ nk_status nk_freelist_init(nk_freelist *f, const nk_freelist_attrs *attrs,
 void nk_freelist_destroy(nk_freelist *f) {
   for (nk_freelist_node *n = f->freelist_head, *next = NULL; n; n = next) {
     next = n->next;
-    f->attrs.free_func(&f->attrs, f->cookie, n);
+    f->attrs.free_func(&f->attrs, f->cookie, FREELIST_OBJ_FROM_NODE(f, n));
   }
   pthread_spin_destroy(&f->lock);
 }
@@ -57,8 +63,9 @@ void *nk_freelist_alloc(nk_freelist *f) {
     f->freelist_head = n->next;
     f->count--;
     pthread_spin_unlock(&f->lock);
-    f->attrs.zero_func(&f->attrs, f->cookie, n);
-    return n;
+    void *obj = FREELIST_OBJ_FROM_NODE(f, n);
+    f->attrs.zero_func(&f->attrs, f->cookie, obj);
+    return obj;
   } else {
     pthread_spin_unlock(&f->lock);
     return f->attrs.alloc_func(&f->attrs, f->cookie);
@@ -72,7 +79,7 @@ void nk_freelist_free(nk_freelist *f, void *p) {
     pthread_spin_unlock(&f->lock);
     f->attrs.free_func(&f->attrs, f->cookie, p);
   } else {
-    nk_freelist_node *n = p;
+    nk_freelist_node *n = FREELIST_NODE_FROM_OBJ(f, p);
     n->next = f->freelist_head;
     f->freelist_head = n;
     f->count++;
