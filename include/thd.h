@@ -15,6 +15,45 @@ typedef struct nk_dpc nk_dpc;
 typedef struct nk_host nk_host;
 typedef struct nk_hostthd nk_hostthd;
 
+/*
+ * A note on locking/atomicity:
+ *
+ * The following locks exist in the system:
+ *
+ * - A lock on every queue in the system: the run queue and every object on
+ *   which a thread can wait.
+ *
+ * - A "running lock" on each thread, locked whenever the thread's context is
+ *   active. This protects against a race condition where a thread puts itself
+ *   on a wait-queue, releases the lock on that wait queue, and its about to
+ *   yield, but another thread intervenes and moves it back to the run-queue
+ *   and it is chosen by another host thread before it yields on the host
+ *   thread.
+ *
+ * That's it -- there is no thread state to atomically transition, and no
+ * global locking (aside from the global-ness implicit in a global run queue).
+ *
+ * Any blocking operation will atomically place its thread on a wait queue,
+ * then swap context back to the host thread's scheduling context. A standard
+ * cooperative yield will pass another yield code indicating "still ready to
+ * run". An exit will pass a third yield code indicating "please destroy".
+ *
+ * Any agent moving a thread between queues holds only one lock at a time.
+ * There is no lock order because locks are never held together.
+ *
+ * The running state of a given user thread lags the on-queue state: the
+ * scheduler will remove it from the run queue and then eventually switch to
+ * it, but the switch back may occur after the thread is placed on some queue.
+ * The running lock avoids the race condition inherent in this.
+ *
+ * (TODO: we can fix the above, and remove the need for the running lock, by
+ * passing a more descriptive status back when yielding out of a thread to the
+ * scheduler: "place me on this thread-queue guarded by this lock", where one
+ * option is the global run-queue, or "destroy me" when exiting. We should
+ * abstract scheduler queues and use them in all synchronization objects,
+ * providing "wake up one" and "wake up all" operations.)
+ */
+
 // -------------- schobs: schedulable entities. --------------
 
 typedef enum nk_schob_type {
