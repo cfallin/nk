@@ -492,8 +492,8 @@ err:
 }
 
 void nk_host_run(nk_host *host, int workers) {
-  // Create workers. Create one more 'hidden' worker to run the main DPC.
-  for (int i = 0; i < workers + 1; i++) {
+  // Create workers.
+  for (int i = 0; i < workers; i++) {
     nk_hostthd *hostthd;
     nk_status status = nk_hostthd_create(&hostthd, host);
     if (status != NK_OK) {
