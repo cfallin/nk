@@ -185,10 +185,6 @@ struct nk_host {
   pthread_mutex_t runq_mutex;
   pthread_cond_t runq_cond;
   queue_head runq;
-  // Wakeup queue. Separate spinlock -- acquired under port locks on recv
-  // wakeup.
-  queue_head wakeupq;
-  pthread_spinlock_t wakeup_lock;
   // How many threads and DPCs exist in total?
   int schob_count;
   // How many host-threads exist? Protected by runq_mutex.

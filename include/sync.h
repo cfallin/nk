@@ -33,8 +33,7 @@ void nk_cond_broadcast(nk_cond *c);
 typedef struct nk_barrier {
   nk_host *host;
   pthread_spinlock_t lock;
-  int waiter_count;
-  int woken_count;
+  int count;
   int limit;
   queue_head waiters;
 } nk_barrier;

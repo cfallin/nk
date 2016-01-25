@@ -343,8 +343,9 @@ static void *nk_hostthd_main(void *_self) {
       }
       pthread_mutex_unlock(&host->runq_mutex);
     }
-    // If `next` is in the READY state, place it back on the runqueue.
+    // If `next` yielded ready to run again, place it back on the runqueue.
     else if (insert_into_runq) {
+      next->state = NK_SCHOB_STATE_READY;
       pthread_mutex_lock(&host->runq_mutex);
       nk_schob_runq_push(&host->runq, next);
       pthread_mutex_unlock(&host->runq_mutex);

@@ -164,7 +164,7 @@ nk_status nk_msg_init_freelists(nk_host *h) {
   return NK_OK;
 }
 
-void nk_msg_destroy_freelists(nk_host* h) {
-    nk_freelist_destroy(&h->msg_freelist);
-    nk_freelist_destroy(&h->port_freelist);
+void nk_msg_destroy_freelists(nk_host *h) {
+  nk_freelist_destroy(&h->msg_freelist);
+  nk_freelist_destroy(&h->port_freelist);
 }
