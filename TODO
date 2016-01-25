@@ -1,0 +1,21 @@
+To-do list
+----------
+
+Performance
+- Thread stack freelisting (avoid mmap()/mprotect()/munmap() calls throughout
+  thread lifetime)
+- Lock-free implementations where possible: run-queue, wait-queues,
+  thread-state transitions
+- Distributed task queue with work-stealing
+
+Correctness/cleanliness
+- Refactor locking structure / scheduler design so that yields back to
+  scheduler pass a queue on which to place thread, if any. This removes the
+  need for the per-thread running-lock. We need to build a generic
+  thread-queue-with-lock data structure to support this.
+
+Feature list
+- C++ wrapper
+  - anonymous thread/DPC-spawn with lambda arg
+  - RAII mutexes
+  - templated message-passing of POD classes
