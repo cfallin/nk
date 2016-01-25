@@ -59,7 +59,6 @@ void nk_mutex_unlock(nk_mutex *m) {
   m->locked = 0;
   if (!nk_schob_runq_empty(&m->waiters)) {
     nk_thd *t = (nk_thd *)nk_schob_runq_shift(&m->waiters);
-    t->schob.state = NK_SCHOB_STATE_READY;
     pthread_spin_unlock(&m->lock);
     nk_schob_enqueue(m->host, (nk_schob *)t, /* new_schob = */ 0);
   } else {
@@ -104,7 +103,6 @@ void nk_cond_wait(nk_cond *c, nk_mutex *m) {
   // We enqueue ourselves first and *then* unlock the mutex.
   pthread_spin_lock(&c->lock);
   nk_schob_runq_push(&c->waiters, (nk_schob *)self);
-  self->schob.state = NK_SCHOB_STATE_WAITING;
   pthread_spin_unlock(&c->lock);
   // This gap does not create a race condition: even if some other thread
   // immediately signals the condition variable here, once we release the
@@ -120,7 +118,6 @@ void nk_cond_signal(nk_cond *c) {
   pthread_spin_lock(&c->lock);
   if (!nk_schob_runq_empty(&c->waiters)) {
     nk_thd *t = (nk_thd *)nk_schob_runq_shift(&c->waiters);
-    t->schob.state = NK_SCHOB_STATE_READY;
     nk_schob_enqueue(c->host, (nk_schob *)t, /* new_schob = */ 0);
   }
   pthread_spin_unlock(&c->lock);
@@ -132,7 +129,6 @@ void nk_cond_broadcast(nk_cond *c) {
   QUEUE_INIT(&to_run);
   while (!nk_schob_runq_empty(&c->waiters)) {
     nk_thd *t = (nk_thd *)nk_schob_runq_shift(&c->waiters);
-    t->schob.state = NK_SCHOB_STATE_READY;
     nk_schob_runq_push(&to_run, (nk_schob *)t);
   }
   pthread_spin_unlock(&c->lock);
@@ -187,7 +183,6 @@ void nk_barrier_wait(nk_barrier *b) {
     QUEUE_INIT(&to_run);
     while (!nk_schob_runq_empty(&b->waiters)) {
       nk_thd *t = (nk_thd *)nk_schob_runq_shift(&b->waiters);
-      t->schob.state = NK_SCHOB_STATE_READY;
       nk_schob_runq_push(&to_run, (nk_schob *)t);
     }
     pthread_spin_unlock(&b->lock);

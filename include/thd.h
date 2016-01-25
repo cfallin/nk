@@ -17,13 +17,6 @@ typedef struct nk_hostthd nk_hostthd;
 
 // -------------- schobs: schedulable entities. --------------
 
-typedef enum nk_schob_state {
-  NK_SCHOB_STATE_READY,   // on a scheduler run queue.
-  NK_SCHOB_STATE_RUNNING, // actually running in a host thread.
-  NK_SCHOB_STATE_WAITING, // waiting at a port/semaphore.
-  NK_SCHOB_STATE_ZOMBIE,  // zombie, now waiting to be freed.
-} nk_schob_state;
-
 typedef enum nk_schob_type {
   NK_SCHOB_TYPE_THD, // cooperatively-scheduled thread with own stack.
   NK_SCHOB_TYPE_DPC, // deferred procedure call to execute only once.
@@ -31,7 +24,6 @@ typedef enum nk_schob_type {
 
 struct nk_schob {
   nk_schob_type type;
-  nk_schob_state state;
 
   // on a global scheduler queue, host-thread queue, msg or sem queue, join
   // queue, or cleanup queue.

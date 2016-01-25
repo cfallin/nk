@@ -102,7 +102,6 @@ nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
       nk_thd *t = (nk_thd *)nk_schob_runq_shift(&port->thds);
       pthread_spin_unlock(&port->lock);
       t->recvslot = msg;
-      t->schob.state = NK_SCHOB_STATE_READY;
       nk_schob_enqueue(host, (nk_schob *)t, /* new_schob = */ 0);
       return NK_OK;
     } else {

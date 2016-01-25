@@ -47,7 +47,6 @@ nk_dpc *nk_dpc_self() {
 static nk_status nk_schob_init(nk_schob *schob, nk_schob_type type,
                                uint32_t prio) {
   // All fields zeroed on entry.
-  schob->state = NK_SCHOB_STATE_READY;
   schob->type = type;
   schob->prio = prio;
   return NK_OK;
@@ -57,10 +56,6 @@ static void nk_schob_destroy(nk_schob *schob) {
   // Nothing.
 }
 
-static void nk_schob_setdone(nk_host *host, nk_schob *schob) {
-  schob->state = NK_SCHOB_STATE_ZOMBIE;
-}
-
 // This is the main scheduler. It picks a schob off to run of the nk_host
 // context. Assumes `runq_mutex` is already held.
 static nk_schob *nk_schob_next(nk_host *host) {
@@ -68,7 +63,6 @@ static nk_schob *nk_schob_next(nk_host *host) {
     return NULL;
   }
   nk_schob *n = nk_schob_runq_shift(&host->runq);
-  assert(n->state == NK_SCHOB_STATE_READY);
   return n;
 }
 
@@ -204,7 +198,6 @@ void nk_thd_exit() {
   assert(host != NULL);
   nk_thd *self = nk_thd_self();
   assert(self != NULL);
-  nk_schob_setdone(host->host, (nk_schob *)self);
   // Should never return.
   nk_arch_switch_ctx(&self->stacktop, host->hoststack,
                      NK_THD_YIELD_REASON_ZOMBIE);
@@ -291,7 +284,6 @@ static void *nk_hostthd_main(void *_self) {
     // If `next` is a dpc, run it here. If `next` is a thd, context-switch to
     // it until it yields.
     self->running = next;
-    next->state = NK_SCHOB_STATE_RUNNING;
 
     int destroyed = 0;
     int insert_into_runq = 0;
@@ -300,12 +292,8 @@ static void *nk_hostthd_main(void *_self) {
     case NK_SCHOB_TYPE_DPC: {
       nk_dpc *dpc = (nk_dpc *)next;
       dpc->func(dpc->data);
-      nk_schob_setdone(host, next);
-      // If `next` is in the ZOMBIE state, clean it up immediately.
-      if (dpc->schob.state == NK_SCHOB_STATE_ZOMBIE) {
-        nk_dpc_destroy(dpc);
-        destroyed = 1;
-      }
+      nk_dpc_destroy(dpc);
+      destroyed = 1;
       break;
     }
     case NK_SCHOB_TYPE_THD: {
@@ -345,7 +333,6 @@ static void *nk_hostthd_main(void *_self) {
     }
     // If `next` yielded ready to run again, place it back on the runqueue.
     else if (insert_into_runq) {
-      next->state = NK_SCHOB_STATE_READY;
       pthread_mutex_lock(&host->runq_mutex);
       nk_schob_runq_push(&host->runq, next);
       pthread_mutex_unlock(&host->runq_mutex);
