@@ -1,22 +1,186 @@
 #include "sync.h"
 #include "thd.h"
 
+#include <assert.h>
 #include <pthread.h>
 
-nk_status nk_mutex_create(nk_host *host, nk_mutex **ret) {}
-void nk_mutex_destroy(nk_mutex *m) {}
-void nk_mutex_lock(nk_mutex *m) {}
-void nk_mutex_unlock(nk_mutex *m) {}
+nk_status nk_mutex_create(nk_host *host, nk_mutex **ret) {
+  nk_status status;
 
-nk_status nk_cond_create(nk_host *host, nk_cond **ret) {}
-void nk_cond_destroy(nk_cond *c) {}
-void nk_cond_wait(nk_cond *c, nk_mutex *m) {}
-void nk_cond_signal(nk_cond *c) {}
-void nk_cond_broadcast(nk_cond *c) {}
+  status = NK_ERR_NOMEM;
+  nk_mutex *m = nk_freelist_alloc(&h->mutex_freelist);
+  if (!m) {
+    goto err;
+  }
 
-nk_status nk_barrier_create(nk_host *host, nk_barrier **ret, int count) {}
-void nk_barrier_destroy(nk_barrier *b) {}
-void nk_barrier_wait(nk_barrier *b) {}
+  if (pthread_spin_init(&m->lock)) {
+    goto err;
+  }
+
+  m->host = host;
+  QUEUE_INIT(&m->waiters);
+
+  *ret = m;
+  return NK_OK;
+err:
+  if (m) {
+    nk_freelist_free(&h->mutex_freelist, m);
+  }
+  return status;
+}
+
+void nk_mutex_destroy(nk_mutex *m) {
+  assert(nk_schob_runq_empty(&m->waiters));
+  pthread_spin_destroy(&m->lock);
+  nk_freelist_free(&h->mutex_freelist, m);
+}
+
+void nk_mutex_lock(nk_mutex *m) {
+  nk_thd *t = nk_thd_self();
+  assert(t != NULL);
+
+  while (1) {
+    pthread_spin_lock(&m->lock);
+    if (m->locked) {
+      nk_schob_runq_push(&m->waiters, t);
+      pthread_spin_unlock(&m->lock);
+      nk_thd_yield_ext(NK_THD_YIELD_REASON_WAITING);
+    } else {
+      m->locked = 1;
+      pthread_spin_unlock(&m->lock);
+      break;
+    }
+  }
+}
+
+void nk_mutex_unlock(nk_mutex *m) {
+  pthread_spin_lock(&m->lock);
+  m->locked = 0;
+  if (!nk_schob_runq_empty(&m->waiters)) {
+    nk_thd *t = (nk_thd *)nk_schob_runq_shift(&m->waiters);
+    t->schob.state = NK_SCHOB_STATE_READY;
+    nk_schob_enqueue(m->host, (nk_schob *)t, /* new_schob = */ 0);
+  }
+  pthread_spin_unlock(&m->lock);
+}
+
+nk_status nk_cond_create(nk_host *host, nk_cond **ret) {
+  nk_status status;
+
+  status = NK_ERR_NOMEM;
+  nk_cond *c = nk_freelist_alloc(&h->cond_freelist);
+  if (!c) {
+    goto err;
+  }
+
+  if (pthread_spin_init(&c->lock)) {
+    goto err;
+  }
+
+  c->host = host;
+  QUEUE_INIT(&c->waiters);
+
+  *ret = c;
+  return NK_OK;
+err:
+  if (c) {
+    nk_freelist_free(&h->cond_freelist, c);
+  }
+  return status;
+}
+
+void nk_cond_destroy(nk_cond *c) {
+  assert(nk_schob_runq_empty(&c->waiters));
+  pthread_spin_destroy(&c->lock);
+  nk_freelist_free(&c->host->cond_freelist, b);
+}
+
+void nk_cond_wait(nk_cond *c, nk_mutex *m) {
+  nk_thd *self = nk_thd_self();
+  assert(self != NULL);
+
+  // We enqueue ourselves first and *then* unlock the mutex.
+  pthread_spin_lock(&c->lock);
+  nk_schob_runq_push(&c->waiters, self);
+  pthread_spin_unlock(&c->lock);
+  nk_mutex_unlock(m);
+  nk_thd_yield_ext(NK_THD_YIELD_REASON_WAITING);
+  nk_mutex_lock(m);
+}
+
+void nk_cond_signal(nk_cond *c) {
+  pthread_spin_lock(&c->lock);
+  if (!nk_schob_runq_empty(&c->waiters)) {
+    nk_thd *t = (nk_thd *)nk_schob_runq_shift(&c->waiters);
+    t->schob.state = NK_SCHOB_STATE_READY;
+    nk_schob_enqueue(c->host, (nk_schob *)t, /* new_schob = */ 0);
+  }
+  pthread_spin_unlock(&c->lock);
+}
+
+void nk_cond_broadcast(nk_cond *c) {
+  pthread_spin_lock(&c->lock);
+  while (!nk_schob_runq_empty(&c->waiters)) {
+    nk_thd *t = nk_schob_runq_shift(&c->waiters);
+    t->schob.state = NK_SCHOB_STATE_READY;
+    nk_schob_enqueue(c->host, (nk_schob *)t, /* new_schob = */ 0);
+  }
+  pthread_spin_unlock(&c->lock);
+}
+
+nk_status nk_barrier_create(nk_host *host, nk_barrier **ret, int limit) {
+  nk_status status;
+
+  status = NK_ERR_NOMEM;
+  nk_barrier *b = nk_freelist_alloc(&h->barrier_freelist);
+  if (!b) {
+    goto err;
+  }
+
+  if (pthread_spin_init(&b->lock)) {
+    goto err;
+  }
+
+  b->host = host;
+  b->count = 0;
+  b->limit = limit;
+  QUEUE_INIT(&b->waiters);
+
+  *ret = b;
+  return NK_OK;
+err:
+  if (b) {
+    nk_freelist_free(&h->barrier_freelist, b);
+  }
+  return status;
+}
+
+void nk_barrier_destroy(nk_barrier *b) {
+  assert(nk_schob_runq_empty(&b->waiters));
+  pthread_spin_destroy(&b->lock);
+  nk_freelist_free(&b->host->barrier_freelist, b);
+}
+
+void nk_barrier_wait(nk_barrier *b) {
+  nk_thd *self = nk_thd_self();
+  assert(self != NULL);
+  pthread_spin_lock(&b->lock);
+  b->count++;
+  assert(b->count <= b->limit);
+  if (b->count == b->limit) {
+    b->count = 0;
+    while (!nk_schob_runq_empty(&b->waiters)) {
+      nk_thd *t = (nk_thd *)nk_schob_runq_shift(&b->waiters);
+      t->schob.state = NK_SCHOB_STATE_READY;
+      nk_schob_enqueue(b->host, (nk_schob *)t, /* new_schob = */ 0);
+    }
+    pthread_spin_unlock(&b->lock);
+  } else {
+    nk_schob_runq_push(&b->waiters, self);
+    pthread_spin_unlock(&b->lock);
+    nk_thd_yield_ext(NK_THD_YIELD_REASON_WAITING);
+  }
+}
 
 DEFINE_SIMPLE_FREELIST_TYPE(nk_mutex, 10000);
 DEFINE_SIMPLE_FREELIST_TYPE(nk_cond, 10000);

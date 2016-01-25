@@ -103,9 +103,6 @@ nk_status nk_msg_send(nk_port *port, nk_port *from, void *data1, void *data2) {
       pthread_spin_unlock(&port->lock);
       t->recvslot = msg;
       t->schob.state = NK_SCHOB_STATE_READY;
-      // printf("msg_send: sending msg %p to thread %p (old state %d)\n", msg,
-      // t,
-      //       t->schob.state);
       nk_schob_enqueue(host, (nk_schob *)t, /* new_schob = */ 0);
       return NK_OK;
     } else {
@@ -132,9 +129,17 @@ nk_status nk_msg_recv(nk_port *port, nk_msg **ret) {
   } else {
     nk_schob_runq_push(&port->thds, (nk_schob *)self);
     pthread_spin_unlock(&port->lock);
-    // printf("msg_recv: thd %p going to sleep\n", self);
+    // Note that this gap between unlock and yield is nevertheless safe from
+    // race conditions: we indicate via the yield to the host thread scheduler
+    // that we're waiting, so the host thread scheduler will not place us back
+    // on the runqueue as it would for an ordinary yield. Rather, the port
+    // itself logically owns this thread now. It could be the case that some
+    // other thread concurrently delivers a message and places us back on the
+    // runqueue before we even reach this yield, but that's OK, because then
+    // we'll simply wake up when next scheduled off the runqueue. (Note that
+    // the thread-running lock prevents another host thread from jumping to our
+    // context before we leave it here.)
     nk_thd_yield_ext(NK_THD_YIELD_REASON_WAITING);
-    // printf("msg_recv: thd %p woke up\n", self);
     assert(self->recvslot);
     *ret = self->recvslot;
     self->recvslot = NULL;

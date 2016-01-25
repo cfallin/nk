@@ -69,6 +69,13 @@ struct nk_thd_attrs {
 
 struct nk_thd {
   nk_schob schob; // parent class
+  // The running-lock is necessary because some operations that block may place
+  // the thread atomically in some other queue, and some other host thread may
+  // then wake it back up and place it back on the runqueue, before the
+  // blocking thread finally leaves its context in nk_thd_yield_ext(). The lock
+  // is locked before a host thread switches to a thread and is unlocked as
+  // soon as that thread returns.
+  pthread_spinlock_t running_lock;
   void *stack;
   void *stacktop;
   size_t stacklen; // actual stacklen, as opposed to attrs-specified len.

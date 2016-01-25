@@ -9,6 +9,7 @@
 typedef struct nk_mutex {
   nk_host *host;
   pthread_spinlock_t lock;
+  int locked;
   queue_head waiters;
 } nk_mutex;
 
@@ -32,12 +33,13 @@ void nk_cond_broadcast(nk_cond *c);
 typedef struct nk_barrier {
   nk_host *host;
   pthread_spinlock_t lock;
-  int count;
+  int waiter_count;
+  int woken_count;
   int limit;
   queue_head waiters;
 } nk_barrier;
 
-nk_status nk_barrier_create(nk_host *host, nk_barrier **ret, int count);
+nk_status nk_barrier_create(nk_host *host, nk_barrier **ret, int limit);
 void nk_barrier_destroy(nk_barrier *b);
 void nk_barrier_wait(nk_barrier *b);
 

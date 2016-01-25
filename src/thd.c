@@ -146,6 +146,10 @@ nk_status nk_thd_create_ext(nk_host *host, nk_thd **ret,
     goto err;
   }
 
+  if (pthread_spin_init(&t->running_lock, PTHREAD_PROCESS_PRIVATE)) {
+    goto err;
+  }
+
   status = NK_ERR_NOMEM;
   size_t stacksize = attrs ? attrs->stacksize : NK_THD_STACKSIZE_DEFAULT;
   status = allocstack(stacksize, &t->stack, &t->stacktop, &t->stacklen);
@@ -179,6 +183,7 @@ static void nk_thd_destroy(nk_thd *t) {
   assert(hostthd != NULL);
   nk_host *host = hostthd->host;
   freestack(t->stacklen, t->stack);
+  pthread_spin_destroy(&t->running_lock);
   nk_schob_destroy(&t->schob);
   nk_freelist_free(&host->thd_freelist, t);
 }
@@ -189,8 +194,6 @@ void nk_thd_yield_ext(nk_thd_yield_reason r) {
   nk_thd *self = nk_thd_self();
   assert(self != NULL);
   // Context-switch back to host thread, which will schedule the next item.
-  // printf("yield: about to switch to rip %016lx\n",
-  //       *(uint64_t *)((uint8_t *)host->hoststack + 48));
   nk_arch_switch_ctx(&self->stacktop, host->hoststack, r);
 }
 
@@ -203,8 +206,6 @@ void nk_thd_exit() {
   assert(self != NULL);
   nk_schob_setdone(host->host, (nk_schob *)self);
   // Should never return.
-  // printf("exit: about to switch to rip %016lx\n",
-  //       *(uint64_t *)((uint8_t *)host->hoststack + 48));
   nk_arch_switch_ctx(&self->stacktop, host->hoststack,
                      NK_THD_YIELD_REASON_ZOMBIE);
   while (1) {
@@ -290,8 +291,6 @@ static void *nk_hostthd_main(void *_self) {
     // If `next` is a dpc, run it here. If `next` is a thd, context-switch to
     // it until it yields.
     self->running = next;
-    // printf("hostthd %p: schob %p came off runq with state %d\n", self, next,
-    //       next->state);
     next->state = NK_SCHOB_STATE_RUNNING;
 
     int destroyed = 0;
@@ -311,10 +310,11 @@ static void *nk_hostthd_main(void *_self) {
     }
     case NK_SCHOB_TYPE_THD: {
       nk_thd *thd = (nk_thd *)next;
-      // printf("hostthd %p switching to thd %p\n", self, thd);
-      // printf("hostthd: about to switch to rip %016lx\n",
-      //       *(uint64_t *)((uint8_t *)thd->stacktop + 48));
-      switch (nk_arch_switch_ctx(&self->hoststack, thd->stacktop, 0)) {
+      pthread_spin_lock(&thd->running_lock);
+      nk_thd_yield_reason reason =
+          nk_arch_switch_ctx(&self->hoststack, thd->stacktop, 0);
+      pthread_spin_unlock(&thd->running_lock);
+      switch (reason) {
       case NK_THD_YIELD_REASON_READY:
         // insert into runqueue below.
         insert_into_runq = 1;
@@ -329,8 +329,6 @@ static void *nk_hostthd_main(void *_self) {
         // already.
         break;
       }
-      // printf("hostthd %p got control back from thd %p with state %d\n", self,
-      //       thd, next->state);
       break;
     }
     }
@@ -440,7 +438,7 @@ nk_status nk_host_create(nk_host **ret) {
     goto err6;
   }
   if (nk_sync_init_freelists(h) != NK_OK) {
-      goto err7;
+    goto err7;
   }
 
   *ret = NK_AUTOPTR_STEAL(nk_host, h);
