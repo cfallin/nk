@@ -128,12 +128,18 @@ void nk_cond_signal(nk_cond *c) {
 
 void nk_cond_broadcast(nk_cond *c) {
   pthread_spin_lock(&c->lock);
+  queue_head to_run;
+  QUEUE_INIT(&to_run);
   while (!nk_schob_runq_empty(&c->waiters)) {
     nk_thd *t = (nk_thd *)nk_schob_runq_shift(&c->waiters);
     t->schob.state = NK_SCHOB_STATE_READY;
-    nk_schob_enqueue(c->host, (nk_schob *)t, /* new_schob = */ 0);
+    nk_schob_runq_push(&to_run, (nk_schob *)t);
   }
   pthread_spin_unlock(&c->lock);
+  while (!nk_schob_runq_empty(&to_run)) {
+    nk_thd *t = (nk_thd *)nk_schob_runq_shift(&to_run);
+    nk_schob_enqueue(c->host, (nk_schob *)t, /* new_schob = */ 0);
+  }
 }
 
 nk_status nk_barrier_create(nk_host *host, nk_barrier **ret, int limit) {
@@ -177,12 +183,18 @@ void nk_barrier_wait(nk_barrier *b) {
   assert(b->count <= b->limit);
   if (b->count == b->limit) {
     b->count = 0;
+    queue_head to_run;
+    QUEUE_INIT(&to_run);
     while (!nk_schob_runq_empty(&b->waiters)) {
       nk_thd *t = (nk_thd *)nk_schob_runq_shift(&b->waiters);
       t->schob.state = NK_SCHOB_STATE_READY;
-      nk_schob_enqueue(b->host, (nk_schob *)t, /* new_schob = */ 0);
+      nk_schob_runq_push(&to_run, (nk_schob *)t);
     }
     pthread_spin_unlock(&b->lock);
+    while (!nk_schob_runq_empty(&to_run)) {
+      nk_thd *t = (nk_thd *)nk_schob_runq_shift(&to_run);
+      nk_schob_enqueue(b->host, (nk_schob *)t, /* new_schob = */ 0);
+    }
   } else {
     nk_schob_runq_push(&b->waiters, (nk_schob *)self);
     pthread_spin_unlock(&b->lock);

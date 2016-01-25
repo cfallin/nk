@@ -153,5 +153,74 @@ NK_TEST(sync_cond) {
     }
   }
 
+  nk_host_destroy(h);
+
+  NK_TEST_OK();
+}
+
+struct sync_barrier_arg {
+  nk_barrier *b1;
+  nk_barrier *b2;
+  nk_mutex *m;
+  int done_count;
+  int iters;
+  int thdcount;
+  int ok_iters;
+};
+
+static void sync_barrier_thd1(nk_thd *self, void *_arg) {
+  struct sync_barrier_arg *arg = _arg;
+
+  for (int i = 0; i < arg->iters; i++) {
+    nk_barrier_wait(arg->b1);
+    nk_mutex_lock(arg->m);
+    arg->done_count++;
+    nk_mutex_unlock(arg->m);
+    nk_barrier_wait(arg->b2);
+  }
+}
+
+static void sync_barrier_thd2(nk_thd *self, void *_arg) {
+  struct sync_barrier_arg *arg = _arg;
+
+  for (int i = 0; i < arg->iters; i++) {
+    nk_barrier_wait(arg->b1);
+    nk_barrier_wait(arg->b2);
+    if (arg->done_count == arg->thdcount) {
+      arg->ok_iters++;
+    }
+    arg->done_count = 0;
+  }
+}
+
+NK_TEST(sync_barrier) {
+  nk_host *h;
+  NK_TEST_ASSERT(nk_host_create(&h) == NK_OK);
+  static const int kThdCount = 100;
+  static const int kIterCount = 100;
+
+  struct sync_barrier_arg arg;
+  nk_thd *thds[kThdCount];
+  nk_thd *masterthd;
+  memset(&arg, 0, sizeof(struct sync_barrier_arg));
+  arg.thdcount = kThdCount;
+  arg.iters = kIterCount;
+  nk_mutex_create(h, &arg.m);
+  nk_barrier_create(h, &arg.b1, kThdCount + 1);
+  nk_barrier_create(h, &arg.b2, kThdCount + 1);
+  for (int i = 0; i < kThdCount; i++) {
+    nk_thd_create_ext(h, &thds[i], &sync_barrier_thd1, &arg, NULL);
+  }
+  nk_thd_create_ext(h, &masterthd, &sync_barrier_thd2, &arg, NULL);
+
+  nk_host_run(h, 100, NULL, NULL);
+
+  NK_TEST_ASSERT(arg.ok_iters == kIterCount);
+
+  nk_barrier_destroy(arg.b2);
+  nk_barrier_destroy(arg.b1);
+  nk_mutex_destroy(arg.m);
+  nk_host_destroy(h);
+
   NK_TEST_OK();
 }
