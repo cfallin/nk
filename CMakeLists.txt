@@ -7,7 +7,7 @@ enable_language(ASM-ATT)
 cmake_minimum_required(VERSION 2.6)
 project(nk)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99")
 add_library(nk ${SRCS})
 target_link_libraries(nk pthread)
 
