@@ -1,6 +1,8 @@
 nk: a small cooperative-thread/message-passing "nanokernel" in userspace
 ------------------------------------------------------------------------
 
+[![Build Status](https://travis-ci.org/cfallin/nk.svg?branch=master)](https://travis-ci.org/cfallin/nk)
+
 `nk` ("nanokernel") is a runtime built on top of pthreads that implements
 cooperative (non-preemptive) multithreading between cheap user threads and
 one-off deferred procedure calls (DPCs). It supports message-passing between
