@@ -20,9 +20,9 @@
  * IN THE SOFTWARE.
  */
 
-#include "thd.h"
-#include "msg.h"
-#include "sync.h"
+#include "nk/thd.h"
+#include "nk/msg.h"
+#include "nk/sync.h"
 
 #include <assert.h>
 #include <pthread.h>

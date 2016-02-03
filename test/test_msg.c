@@ -20,7 +20,7 @@
  * IN THE SOFTWARE.
  */
 
-#include "msg.h"
+#include "nk/msg.h"
 #include "test.h"
 
 struct msg_cross_messages_arg {

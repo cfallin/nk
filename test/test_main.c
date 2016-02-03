@@ -20,7 +20,7 @@
  * IN THE SOFTWARE.
  */
 
-#include "kernel.h"
+#include "nk/kernel.h"
 #include "test.h"
 
 int main(int argc, char **argv) { return nk_run_tests(); }

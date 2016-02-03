@@ -23,9 +23,9 @@
 #ifndef __NK_THD_H__
 #define __NK_THD_H__
 
-#include "kernel.h"
-#include "queue.h"
-#include "alloc.h"
+#include "nk/kernel.h"
+#include "nk/queue.h"
+#include "nk/alloc.h"
 
 // typedefs.
 typedef struct nk_schob nk_schob;

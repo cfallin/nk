@@ -23,7 +23,7 @@
 #ifndef __NK_ALLOC_H__
 #define __NK_ALLOC_H__
 
-#include "kernel.h"
+#include "nk/kernel.h"
 
 #include <pthread.h>
 

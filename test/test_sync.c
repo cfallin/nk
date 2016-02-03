@@ -21,7 +21,7 @@
  */
 
 #include "test.h"
-#include "sync.h"
+#include "nk/sync.h"
 
 struct sync_mutex_arg {
   nk_mutex *m;

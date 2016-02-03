@@ -20,7 +20,7 @@
  * IN THE SOFTWARE.
  */
 
-#include "msg.h"
+#include "nk/msg.h"
 
 #include <assert.h>
 #include <pthread.h>

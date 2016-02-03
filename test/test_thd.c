@@ -21,8 +21,8 @@
  */
 
 #include "test.h"
-#include "kernel.h"
-#include "thd.h"
+#include "nk/kernel.h"
+#include "nk/thd.h"
 
 static void thd_dpc_main(void *arg) {
   int *flag = arg;

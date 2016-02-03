@@ -20,8 +20,8 @@
  * IN THE SOFTWARE.
  */
 
-#include "sync.h"
-#include "thd.h"
+#include "nk/sync.h"
+#include "nk/thd.h"
 
 #include <assert.h>
 #include <pthread.h>

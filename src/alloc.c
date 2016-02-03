@@ -20,7 +20,7 @@
  * IN THE SOFTWARE.
  */
 
-#include "alloc.h"
+#include "nk/alloc.h"
 
 #include <pthread.h>
 #include <string.h>

@@ -23,8 +23,8 @@
 #ifndef __NK_SYNC_H__
 #define __NK_SYNC_H__
 
-#include "kernel.h"
-#include "thd.h"
+#include "nk/kernel.h"
+#include "nk/thd.h"
 
 #include <pthread.h>
 

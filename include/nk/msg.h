@@ -23,10 +23,10 @@
 #ifndef __NK_MSG_H__
 #define __NK_MSG_H__
 
-#include "kernel.h"
-#include "queue.h"
-#include "thd.h"
-#include "alloc.h"
+#include "nk/kernel.h"
+#include "nk/queue.h"
+#include "nk/thd.h"
+#include "nk/alloc.h"
 
 #include <pthread.h>
 
