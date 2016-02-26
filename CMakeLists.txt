@@ -8,7 +8,8 @@ cmake_minimum_required(VERSION 2.6)
 project(nk)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99")
-add_library(nk ${SRCS})
+add_library(nkobj OBJECT ${SRCS})
+add_library(nk $<TARGET_OBJECTS:nkobj>)
 target_link_libraries(nk pthread)
 
 add_executable(nk_test ${SRCS} ${TEST_SRCS})
