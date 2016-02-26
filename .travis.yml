@@ -1,6 +1,9 @@
 language: cpp
 compiler:
     - gcc
+sudo: required
+before_install:
+    - ./setup_travis.sh
 before_script:
     - mkdir build
     - cd build
