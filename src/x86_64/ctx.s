@@ -59,7 +59,8 @@ nk_arch_create_ctx:
     movq $0, 0(%rdi)
     # Push context frame: rip, rbp, r15, r14, r13, r12, rbx.
     subq $56, %rdi
-    movq $trampoline, 48(%rdi)  # rip
+    movabsq $trampoline, %rax
+    movq %rax, 48(%rdi)         # rip
     movq $0, 40(%rdi)           # rbp
     movq %rdx, 32(%rdi)         # data1 -> r15 in frame -> rdi in trampoline
     movq %rcx, 24(%rdi)         # data2 -> r14 in frame -> rsi in trampoline
